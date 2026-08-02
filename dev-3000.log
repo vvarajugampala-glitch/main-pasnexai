@@ -1,0 +1,17 @@
+
+> pasnexai@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.10 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.1.2:3000
+- Environments: .env.local
+✓ Ready in 2.4s
+Creating turbopack project { dir: 'D:\\from download\\New folder\\pasnexai', testMode: true }
+○ Compiling proxy ...
+
+○ Compiling / ...
+ GET / 200 in 16.4s (next.js: 7.1s, application-code: 9.2s)
+ GET /api/health 200 in 1033ms (next.js: 927ms, application-code: 105ms)
+✓ Compiled in 19s
+ GET / 200 in 4.6s (next.js: 1267ms, application-code: 3.4s)

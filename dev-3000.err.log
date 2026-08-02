@@ -1,0 +1,5 @@
+⚠ Slow filesystem detected. The benchmark took 612ms. If D:\from download\New folder\pasnexai\.next/dev is a network drive, consider moving it to a local folder.
+See more: https://nextjs.org/docs/app/guides/local-development
+[browser] ⨯ unhandledRejection: ChunkLoadError: Failed to load chunk /_next/static/chunks/%5Bturbopack%5D_browser_dev_hmr-client_hmr-client_ts_1mojsay._.js from module [turbopack]/browser/dev/hmr-client/hmr-client.ts [app-client] (ecmascript, async loader)
+[browser] Image with src "/hero.person.jpg.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio. (file://D:/from download/New folder/pasnexai/.next/dev/static/chunks/node_modules_next_dist_1ybzpk2._.js:1340:21)
+[browser] Image with src "/Shoecase-female.png" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes (file://D:/from download/New folder/pasnexai/.next/dev/static/chunks/node_modules_next_dist_1ybzpk2._.js:1340:21)
