@@ -135,6 +135,10 @@ export function ProviderEventsViewer() {
     ["Live dispatch", journeyStatus.liveReady, "Production sending remains locked until final approval."],
   ] as const;
   const preLiveGatePassed = productionGateChecks.filter(([label]) => label !== "Live dispatch").every(([, complete]) => complete);
+  const latestRealWebhook = events.find((event) => event.event_type !== "meta.test" && !String(event.payload?.source ?? "").includes("admin_test"));
+  const latestWebhookAgeMinutes = latestRealWebhook
+    ? Math.max(0, Math.round((Date.now() - new Date(latestRealWebhook.created_at).getTime()) / 60000))
+    : null;
 
   const sendTestEvent = async () => {
     setIsSendingTest(true);
@@ -406,6 +410,35 @@ export function ProviderEventsViewer() {
               <p className="mt-1 text-sm font-semibold text-slate-400">{label}</p>
             </article>
           ))}
+        </section>
+
+        <section className="mt-6 rounded-lg border border-blue-300/20 bg-blue-400/10 p-5">
+          <HiOutlineShieldCheck className="h-7 w-7 text-blue-200" />
+          <h2 className="mt-4 text-xl font-black">Real webhook delivery check</h2>
+          {latestRealWebhook ? (
+            <div className="mt-3 grid gap-3 text-sm leading-6 text-slate-300 md:grid-cols-3">
+              <p className="rounded-lg bg-[#030712]/60 p-3">
+                Last real event<br />
+                <span className="font-black text-white">{formatDate(latestRealWebhook.created_at)}</span>
+              </p>
+              <p className="rounded-lg bg-[#030712]/60 p-3">
+                Provider ID<br />
+                <span className="font-black text-white">{latestRealWebhook.provider_account_id ?? "Not found"}</span>
+              </p>
+              <p className="rounded-lg bg-[#030712]/60 p-3">
+                Status<br />
+                <span className="font-black text-white">{latestRealWebhook.processing_status.replaceAll("_", " ")}</span>
+              </p>
+              <p className="md:col-span-3">
+                If a new Instagram DM is sent now and this timestamp does not change after Refresh Events, Meta did not deliver a webhook to Pasnex. Then check Meta app mode, tester role, webhook subscription, and Instagram messaging permissions.
+                {latestWebhookAgeMinutes !== null ? ` Last delivery was about ${latestWebhookAgeMinutes} minutes ago.` : ""}
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              No real provider webhook has been received yet. Internal tests can still work because they bypass Meta delivery.
+            </p>
+          )}
         </section>
 
         <section className="mt-6 rounded-lg border border-white/10 bg-[#07101d]/90 p-5">
