@@ -78,6 +78,43 @@ function getProviderAccountId(payload: MetaWebhookPayload) {
   return payload.entry?.[0]?.id ?? null;
 }
 
+function compactUnique(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
+}
+
+function getMessagingEvent(payload: MetaWebhookPayload) {
+  return payload.entry?.[0]?.messaging?.[0] as
+    | {
+        sender?: { id?: string };
+        recipient?: { id?: string };
+        message?: { mid?: string; text?: string };
+        postback?: { title?: string };
+      }
+    | undefined;
+}
+
+function getProviderAccountCandidates(payload: MetaWebhookPayload) {
+  const entry = payload.entry?.[0];
+  const changeValue = entry?.changes?.[0]?.value as
+    | {
+        metadata?: { phone_number_id?: string; display_phone_number?: string };
+        id?: string;
+        page_id?: string;
+        recipient_id?: string;
+      }
+    | undefined;
+  const messagingEvent = getMessagingEvent(payload);
+
+  return compactUnique([
+    entry?.id,
+    messagingEvent?.recipient?.id,
+    changeValue?.id,
+    changeValue?.page_id,
+    changeValue?.recipient_id,
+    changeValue?.metadata?.phone_number_id,
+  ]);
+}
+
 function getChannelType(payload: MetaWebhookPayload) {
   if (payload.entry?.[0]?.changes?.[0]?.value?.messaging_product === "whatsapp") return "whatsapp";
   if (payload.object === "instagram") return "instagram";
@@ -85,17 +122,35 @@ function getChannelType(payload: MetaWebhookPayload) {
   return "messenger";
 }
 
+function getChannelTypeCandidates(payload: MetaWebhookPayload) {
+  if (payload.entry?.[0]?.changes?.[0]?.value?.messaging_product === "whatsapp") return ["whatsapp"];
+  if (payload.object === "instagram") return ["instagram"];
+
+  // Meta can deliver Instagram/Messenger events under object: "page" depending on the product subscription.
+  // Prefer Instagram for Pasnex because the current live setup stores the Instagram business id as the channel handle.
+  if (payload.object === "page" && payload.entry?.[0]?.messaging?.length) {
+    return ["instagram", "messenger", "facebook"];
+  }
+
+  if (payload.object === "page") return ["facebook", "instagram", "messenger"];
+  return [getChannelType(payload)];
+}
+
 function extractMessageText(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
-  const changeValue = entry?.changes?.[0]?.value;
+  const changeValue = entry?.changes?.[0]?.value as
+    | { messages?: unknown[]; text?: string; message?: string; comment_id?: string }
+    | undefined;
   const whatsappMessage = changeValue?.messages?.[0] as { text?: { body?: string }; button?: { text?: string } } | undefined;
-  const messagingEvent = entry?.messaging?.[0] as { message?: { text?: string }; postback?: { title?: string } } | undefined;
+  const messagingEvent = getMessagingEvent(payload);
 
   return (
     whatsappMessage?.text?.body ||
     whatsappMessage?.button?.text ||
     messagingEvent?.message?.text ||
     messagingEvent?.postback?.title ||
+    changeValue?.text ||
+    changeValue?.message ||
     "Provider webhook event received."
   );
 }
@@ -104,7 +159,7 @@ function extractProviderMessageId(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
   const changeValue = entry?.changes?.[0]?.value;
   const whatsappMessage = changeValue?.messages?.[0] as { id?: string } | undefined;
-  const messagingEvent = entry?.messaging?.[0] as { message?: { mid?: string } } | undefined;
+  const messagingEvent = getMessagingEvent(payload);
 
   return whatsappMessage?.id || messagingEvent?.message?.mid || null;
 }
@@ -113,7 +168,7 @@ function extractProviderSenderId(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
   const changeValue = entry?.changes?.[0]?.value;
   const whatsappMessage = changeValue?.messages?.[0] as { from?: string } | undefined;
-  const messagingEvent = entry?.messaging?.[0] as { sender?: { id?: string } } | undefined;
+  const messagingEvent = getMessagingEvent(payload);
 
   return whatsappMessage?.from || messagingEvent?.sender?.id || null;
 }
@@ -185,31 +240,43 @@ async function updateWebhookProcessingStatus(eventId: string | null, status: str
 
 async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventId: string | null) {
   const providerAccountId = getProviderAccountId(payload);
+  const providerAccountCandidates = getProviderAccountCandidates(payload);
 
-  if (!providerAccountId) {
-    await updateWebhookProcessingStatus(eventId, "unmapped", "Meta payload did not include an entry.id provider account id.");
+  if (!providerAccountCandidates.length) {
+    await updateWebhookProcessingStatus(
+      eventId,
+      "unmapped",
+      "Meta payload did not include any provider account id candidates from entry.id, recipient.id, or metadata.",
+    );
     return { processed: false, reason: "missing_provider_account_id" };
   }
 
   try {
     const supabase = createSupabaseAdminClient();
-    const channelType = getChannelType(payload);
-    const { data: channel, error: channelError } = await supabase
+    const channelTypeCandidates = getChannelTypeCandidates(payload);
+    const { data: channels, error: channelError } = await supabase
       .from("channels")
-      .select("id, business_id, type")
-      .eq("type", channelType)
-      .eq("handle", providerAccountId)
-      .maybeSingle<{ id: string; business_id: string; type: string }>();
+      .select("id, business_id, type, handle")
+      .in("type", channelTypeCandidates)
+      .in("handle", providerAccountCandidates)
+      .order("connected_at", { ascending: false })
+      .returns<Array<{ id: string; business_id: string; type: string; handle: string | null }>>();
 
     if (channelError) {
       throw new Error(channelError.message);
     }
 
+    const channel =
+      channels?.find((item) => item.type === channelTypeCandidates[0]) ??
+      channels?.find((item) => item.type === "instagram") ??
+      channels?.[0] ??
+      null;
+
     if (!channel) {
       await updateWebhookProcessingStatus(
         eventId,
         "unmapped",
-        `No ${channelType} channel has handle/provider account id ${providerAccountId}.`,
+        `No channel matched webhook. Tried types ${channelTypeCandidates.join(", ")} and provider IDs ${providerAccountCandidates.join(", ")}.`,
       );
       return { processed: false, reason: "channel_mapping_not_found" };
     }
@@ -342,6 +409,8 @@ export async function POST(request: Request) {
     stored: Boolean(storedEventId),
     inboxResult,
     eventType: detectEventType(payload),
+    providerAccountCandidates: getProviderAccountCandidates(payload),
+    channelTypeCandidates: getChannelTypeCandidates(payload),
     receivedAt: new Date().toISOString(),
   });
 
