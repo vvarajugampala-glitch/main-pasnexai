@@ -50,6 +50,18 @@ type ChannelReadiness = {
   };
 };
 
+type ProviderReadinessMeta = {
+  callbackUrl?: string;
+  appId?: string | null;
+  appIdConfigured?: boolean;
+  appSecretConfigured?: boolean;
+  appSecretLength?: number;
+  appSecretSha256Prefix?: string | null;
+  verifyTokenConfigured?: boolean;
+  tokenEncryptionConfigured?: boolean;
+  webhookRoute?: string;
+};
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -89,6 +101,8 @@ export function ProviderEventsViewer() {
   const [readinessSearch, setReadinessSearch] = useState("");
   const [readinessChannelFilter, setReadinessChannelFilter] = useState("all");
   const [readinessStatusFilter, setReadinessStatusFilter] = useState("pending");
+  const [metaReadiness, setMetaReadiness] = useState<ProviderReadinessMeta | null>(null);
+  const [metaReadinessError, setMetaReadinessError] = useState("");
 
   const filteredChannelReadiness = channelReadiness
     .filter((channel) => {
@@ -269,6 +283,23 @@ export function ProviderEventsViewer() {
         setChannelReadiness(result.channelReadiness ?? []);
         setSetupRequired(Boolean(result.setupRequired));
         setOutboundSetupRequired(Boolean(result.outboundSetupRequired));
+
+        const readinessResponse = await fetch("/api/admin/provider-readiness", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const readinessResult = (await readinessResponse.json()) as {
+          meta?: ProviderReadinessMeta;
+          error?: string;
+        };
+
+        if (!mounted) return;
+        if (readinessResponse.ok) {
+          setMetaReadiness(readinessResult.meta ?? null);
+          setMetaReadinessError("");
+        } else {
+          setMetaReadiness(null);
+          setMetaReadinessError(readinessResult.error ?? "Could not load Meta env check.");
+        }
       } catch (eventError) {
         if (!mounted) return;
         setError(eventError instanceof Error ? eventError.message : "Could not load provider events.");
@@ -328,6 +359,58 @@ export function ProviderEventsViewer() {
             Run <span className="font-bold">docs/supabase-provider-outbound.sql</span> in Supabase SQL editor to store outbound reply attempts.
           </div>
         )}
+        <section className="mt-6 rounded-lg border border-cyan-300/15 bg-cyan-400/10 p-5">
+          <HiOutlineShieldCheck className="h-7 w-7 text-cyan-200" />
+          <div className="mt-4 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-[0.28em] text-cyan-200">Meta Env Check</p>
+              <h2 className="mt-2 text-2xl font-black">Production webhook secret fingerprint</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-300">
+                Use this safe fingerprint to confirm Vercel is using the same Meta App Secret. The actual secret is never shown.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRefreshKey((value) => value + 1)}
+              className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-4 py-2.5 text-sm font-bold text-cyan-100 transition hover:bg-cyan-400/15"
+            >
+              Refresh Check
+            </button>
+          </div>
+          {metaReadinessError ? (
+            <p className="mt-4 rounded-lg border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-100">{metaReadinessError}</p>
+          ) : (
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">App ID</p>
+                <p className="mt-2 break-all text-sm font-black text-white">{metaReadiness?.appId ?? "Not loaded"}</p>
+              </article>
+              <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">App Secret</p>
+                <p className={`mt-2 text-sm font-black ${metaReadiness?.appSecretConfigured ? "text-cyan-100" : "text-amber-100"}`}>
+                  {metaReadiness?.appSecretConfigured ? `Configured (${metaReadiness.appSecretLength ?? 0} chars)` : "Missing"}
+                </p>
+                <p className="mt-1 break-all text-xs text-slate-400">
+                  SHA256: {metaReadiness?.appSecretSha256Prefix ?? "not available"}
+                </p>
+              </article>
+              <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Webhook Route</p>
+                <p className="mt-2 break-all text-sm font-black text-white">{metaReadiness?.webhookRoute ?? "/api/provider/meta/webhook"}</p>
+              </article>
+              <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Callback URL</p>
+                <p className="mt-2 break-all text-sm font-black text-white">{metaReadiness?.callbackUrl ?? "Not loaded"}</p>
+              </article>
+              <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3 md:col-span-2 xl:col-span-4">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Diagnosis</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  If Meta Test still shows <span className="font-bold text-white">POST 401</span> and the webhook log says signature header is present, compare this fingerprint with the Meta App Secret. If it does not match, update Vercel <span className="font-bold text-white">META_APP_SECRET</span> and redeploy.
+                </p>
+              </article>
+            </div>
+          )}
+        </section>
 
         <section className={`mt-6 rounded-lg border p-5 ${preLiveGatePassed ? "border-blue-300/20 bg-blue-400/10" : "border-amber-300/15 bg-amber-300/10"}`}>
           <HiOutlineShieldCheck className={`h-7 w-7 ${preLiveGatePassed ? "text-blue-300" : "text-amber-200"}`} />
