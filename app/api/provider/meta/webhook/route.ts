@@ -18,15 +18,20 @@ function timingSafeEqual(left: string, right: string) {
 
 function isValidMetaSignature(rawBody: string, signatureHeader: string | null) {
   if (!appSecret) {
-    return { valid: true, configured: false };
+    return { valid: true, configured: false, expectedPrefix: null, receivedPrefix: signatureHeader?.slice(0, 17) ?? null };
   }
 
   if (!signatureHeader?.startsWith("sha256=")) {
-    return { valid: false, configured: true };
+    return { valid: false, configured: true, expectedPrefix: null, receivedPrefix: signatureHeader?.slice(0, 17) ?? null };
   }
 
   const expected = `sha256=${crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex")}`;
-  return { valid: timingSafeEqual(expected, signatureHeader), configured: true };
+  return {
+    valid: timingSafeEqual(expected, signatureHeader),
+    configured: true,
+    expectedPrefix: expected.slice(0, 17),
+    receivedPrefix: signatureHeader.slice(0, 17),
+  };
 }
 
 type MetaWebhookPayload = {
@@ -388,6 +393,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
+  const legacySignature = request.headers.get("x-hub-signature");
   const signatureCheck = isValidMetaSignature(rawBody, signature);
 
   if (!signatureCheck.valid) {
@@ -395,6 +401,9 @@ export async function POST(request: Request) {
       appSecretConfigured: Boolean(appSecret),
       signatureHeaderPresent: Boolean(signature),
       signatureHeaderFormatValid: Boolean(signature?.startsWith("sha256=")),
+      legacySignatureHeaderPresent: Boolean(legacySignature),
+      expectedSignaturePrefix: signatureCheck.expectedPrefix,
+      receivedSignaturePrefix: signatureCheck.receivedPrefix,
       rawBodyLength: rawBody.length,
       receivedAt: new Date().toISOString(),
     });
