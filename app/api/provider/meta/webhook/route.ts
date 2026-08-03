@@ -16,21 +16,36 @@ function timingSafeEqual(left: string, right: string) {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function isValidMetaSignature(rawBody: Buffer, signatureHeader: string | null) {
+function isValidMetaSignature(rawBody: Buffer, signatureHeader: string | null, legacySignatureHeader: string | null) {
   if (!appSecret) {
-    return { valid: true, configured: false, expectedPrefix: null, receivedPrefix: signatureHeader?.slice(0, 17) ?? null };
+    return {
+      valid: true,
+      configured: false,
+      expectedPrefix: null,
+      receivedPrefix: signatureHeader?.slice(0, 17) ?? null,
+      legacyValid: false,
+      expectedLegacyPrefix: null,
+      receivedLegacyPrefix: legacySignatureHeader?.slice(0, 13) ?? null,
+    };
   }
 
-  if (!signatureHeader?.startsWith("sha256=")) {
-    return { valid: false, configured: true, expectedPrefix: null, receivedPrefix: signatureHeader?.slice(0, 17) ?? null };
-  }
+  const expected = signatureHeader?.startsWith("sha256=")
+    ? `sha256=${crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex")}`
+    : null;
+  const sha256Valid = Boolean(expected && signatureHeader && timingSafeEqual(expected, signatureHeader));
+  const expectedLegacy = legacySignatureHeader?.startsWith("sha1=")
+    ? `sha1=${crypto.createHmac("sha1", appSecret).update(rawBody).digest("hex")}`
+    : null;
+  const legacyValid = Boolean(expectedLegacy && legacySignatureHeader && timingSafeEqual(expectedLegacy, legacySignatureHeader));
 
-  const expected = `sha256=${crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex")}`;
   return {
-    valid: timingSafeEqual(expected, signatureHeader),
+    valid: sha256Valid || legacyValid,
     configured: true,
-    expectedPrefix: expected.slice(0, 17),
-    receivedPrefix: signatureHeader.slice(0, 17),
+    expectedPrefix: expected?.slice(0, 17) ?? null,
+    receivedPrefix: signatureHeader?.slice(0, 17) ?? null,
+    legacyValid,
+    expectedLegacyPrefix: expectedLegacy?.slice(0, 13) ?? null,
+    receivedLegacyPrefix: legacySignatureHeader?.slice(0, 13) ?? null,
   };
 }
 
@@ -395,7 +410,7 @@ export async function POST(request: Request) {
   const rawBody = rawBodyBuffer.toString("utf8");
   const signature = request.headers.get("x-hub-signature-256");
   const legacySignature = request.headers.get("x-hub-signature");
-  const signatureCheck = isValidMetaSignature(rawBodyBuffer, signature);
+  const signatureCheck = isValidMetaSignature(rawBodyBuffer, signature, legacySignature);
 
   if (!signatureCheck.valid) {
     console.warn("Invalid Meta webhook signature", {
@@ -405,6 +420,9 @@ export async function POST(request: Request) {
       legacySignatureHeaderPresent: Boolean(legacySignature),
       expectedSignaturePrefix: signatureCheck.expectedPrefix,
       receivedSignaturePrefix: signatureCheck.receivedPrefix,
+      legacySignatureValid: signatureCheck.legacyValid,
+      expectedLegacySignaturePrefix: signatureCheck.expectedLegacyPrefix,
+      receivedLegacySignaturePrefix: signatureCheck.receivedLegacyPrefix,
       rawBodyLength: rawBodyBuffer.length,
       rawBodySha256Prefix: crypto.createHash("sha256").update(rawBodyBuffer).digest("hex").slice(0, 10),
       receivedAt: new Date().toISOString(),
