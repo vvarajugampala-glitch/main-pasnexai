@@ -93,15 +93,7 @@ export async function POST(request: Request) {
     const page = await readPageFromToken(accessToken);
     const subscribeUrl = new URL(`${getGraphApiBaseUrl()}/${page.id}/subscribed_apps`);
     subscribeUrl.searchParams.set("access_token", accessToken);
-    subscribeUrl.searchParams.set(
-      "subscribed_fields",
-      [
-        "messages",
-        "messaging_postbacks",
-        "messaging_deliveries",
-        "message_echoes",
-      ].join(","),
-    );
+    subscribeUrl.searchParams.set("subscribed_fields", "messages");
 
     const subscribeResponse = await fetch(subscribeUrl, { method: "POST" });
     const subscribeResult = (await subscribeResponse.json().catch(() => ({}))) as {
