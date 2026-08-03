@@ -472,6 +472,53 @@ export function ChannelsLiveGrid() {
     }
   };
 
+  const subscribeMetaWebhooks = async (channel: Channel) => {
+    setBusyType(`subscribe-${channel.id}`);
+    setNotice("");
+
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Please login again to subscribe Meta webhooks.");
+      }
+
+      const response = await fetch("/api/provider/meta/subscribe", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ type: channel.type }),
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        pageName?: string | null;
+        pageId?: string | null;
+        instagramBusinessId?: string | null;
+      };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error ?? "Could not subscribe Meta webhooks.");
+      }
+
+      const nextChannels = await loadChannels();
+      setChannels(nextChannels);
+      setProviderIds(getProviderIdState(nextChannels));
+      setNotice(
+        `Meta webhook subscription refreshed for ${result.pageName ?? "Page"} (${result.pageId ?? "page id unavailable"}). Send a real Instagram DM and refresh Provider Events.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not subscribe Meta webhooks.");
+    } finally {
+      setBusyType("");
+    }
+  };
+
   const repairInstagramMappings = async () => {
     setBusyType("repair-instagram");
     setNotice("");
@@ -691,6 +738,16 @@ export function ChannelsLiveGrid() {
                 className="mt-2 w-full rounded-lg border border-violet-300/25 bg-violet-400/10 py-2 text-xs font-bold text-violet-100 transition hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busyType === `debug-${channel.id}` ? "Checking Meta..." : "Debug Meta Pages"}
+              </button>
+            )}
+            {prepared && channel.type === "instagram" && !channel.id.startsWith("template-") && (
+              <button
+                type="button"
+                onClick={() => void subscribeMetaWebhooks(channel)}
+                disabled={busyType === `subscribe-${channel.id}`}
+                className="mt-2 w-full rounded-lg border border-blue-300/25 bg-blue-400/10 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busyType === `subscribe-${channel.id}` ? "Subscribing..." : "Subscribe Webhook"}
               </button>
             )}
             {debugReports[channel.id] && (
