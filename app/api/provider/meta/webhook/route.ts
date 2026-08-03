@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
-const appSecret = process.env.META_APP_SECRET;
+const appSecret = process.env.META_APP_SECRET?.trim();
 
 function timingSafeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left);
@@ -391,6 +391,13 @@ export async function POST(request: Request) {
   const signatureCheck = isValidMetaSignature(rawBody, signature);
 
   if (!signatureCheck.valid) {
+    console.warn("Invalid Meta webhook signature", {
+      appSecretConfigured: Boolean(appSecret),
+      signatureHeaderPresent: Boolean(signature),
+      signatureHeaderFormatValid: Boolean(signature?.startsWith("sha256=")),
+      rawBodyLength: rawBody.length,
+      receivedAt: new Date().toISOString(),
+    });
     return NextResponse.json({ error: "Invalid Meta webhook signature." }, { status: 401 });
   }
 
