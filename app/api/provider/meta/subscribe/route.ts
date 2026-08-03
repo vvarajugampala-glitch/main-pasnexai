@@ -98,7 +98,7 @@ export async function POST(request: Request) {
       [
         "messages",
         "messaging_postbacks",
-        "messaging_seen",
+        "messaging_reads",
         "messaging_deliveries",
         "message_echoes",
       ].join(","),
