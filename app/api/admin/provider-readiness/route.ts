@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const platformAdminEmails = new Set(["pasnexai@gmail.com"]);
 
 function getSecretFingerprint(value: string | undefined) {
@@ -43,7 +46,8 @@ export async function GET(request: Request) {
     const callbackUrl = process.env.META_WEBHOOK_CALLBACK_URL || `${siteUrl.replace(/\/$/, "")}/api/provider/meta/webhook`;
     const appSecretFingerprint = getSecretFingerprint(process.env.META_APP_SECRET);
 
-    return NextResponse.json({
+    return NextResponse.json(
+      {
       meta: {
         callbackUrl,
         appId: process.env.META_APP_ID ?? null,
@@ -55,7 +59,13 @@ export async function GET(request: Request) {
         tokenEncryptionConfigured: Boolean(process.env.PROVIDER_TOKEN_ENCRYPTION_KEY),
         webhookRoute: "/api/provider/meta/webhook",
       },
-    });
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      },
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not load provider readiness." },

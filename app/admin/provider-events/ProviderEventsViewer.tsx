@@ -286,6 +286,7 @@ export function ProviderEventsViewer() {
 
         const readinessResponse = await fetch("/api/admin/provider-readiness", {
           headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
         });
         const readinessResult = (await readinessResponse.json()) as {
           meta?: ProviderReadinessMeta;
