@@ -16,7 +16,7 @@ function timingSafeEqual(left: string, right: string) {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function isValidMetaSignature(rawBody: string, signatureHeader: string | null) {
+function isValidMetaSignature(rawBody: Buffer, signatureHeader: string | null) {
   if (!appSecret) {
     return { valid: true, configured: false, expectedPrefix: null, receivedPrefix: signatureHeader?.slice(0, 17) ?? null };
   }
@@ -391,10 +391,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const rawBody = await request.text();
+  const rawBodyBuffer = Buffer.from(await request.arrayBuffer());
+  const rawBody = rawBodyBuffer.toString("utf8");
   const signature = request.headers.get("x-hub-signature-256");
   const legacySignature = request.headers.get("x-hub-signature");
-  const signatureCheck = isValidMetaSignature(rawBody, signature);
+  const signatureCheck = isValidMetaSignature(rawBodyBuffer, signature);
 
   if (!signatureCheck.valid) {
     console.warn("Invalid Meta webhook signature", {
@@ -404,7 +405,8 @@ export async function POST(request: Request) {
       legacySignatureHeaderPresent: Boolean(legacySignature),
       expectedSignaturePrefix: signatureCheck.expectedPrefix,
       receivedSignaturePrefix: signatureCheck.receivedPrefix,
-      rawBodyLength: rawBody.length,
+      rawBodyLength: rawBodyBuffer.length,
+      rawBodySha256Prefix: crypto.createHash("sha256").update(rawBodyBuffer).digest("hex").slice(0, 10),
       receivedAt: new Date().toISOString(),
     });
     return NextResponse.json({ error: "Invalid Meta webhook signature." }, { status: 401 });
