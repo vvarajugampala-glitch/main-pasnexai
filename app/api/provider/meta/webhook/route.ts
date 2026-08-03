@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
 const appSecret = process.env.META_APP_SECRET?.trim();
+const allowInvalidSignatureForTests = process.env.META_WEBHOOK_ACCEPT_INVALID_SIGNATURE_FOR_TESTS === "true";
 
 function timingSafeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left);
@@ -214,14 +215,14 @@ async function updateConversationProviderMapping(conversationId: string, recipie
   }
 }
 
-async function storeWebhookEvent(payload: MetaWebhookPayload, rawBody: string, signatureConfigured: boolean) {
+async function storeWebhookEvent(payload: MetaWebhookPayload, rawBody: string, signatureVerified: boolean) {
   try {
     const supabase = createSupabaseAdminClient();
     const { data, error } = await supabase.from("provider_webhook_events").insert({
       provider: "meta",
       event_type: detectEventType(payload),
       provider_account_id: getProviderAccountId(payload),
-      signature_verified: signatureConfigured,
+      signature_verified: signatureVerified,
       processing_status: "received",
       processing_note: "Webhook received and queued for inbox mapping.",
       payload,
@@ -415,6 +416,7 @@ export async function POST(request: Request) {
   if (!signatureCheck.valid) {
     console.warn("Invalid Meta webhook signature", {
       appSecretConfigured: Boolean(appSecret),
+      invalidSignatureTestBypassEnabled: allowInvalidSignatureForTests,
       signatureHeaderPresent: Boolean(signature),
       signatureHeaderFormatValid: Boolean(signature?.startsWith("sha256=")),
       legacySignatureHeaderPresent: Boolean(legacySignature),
@@ -427,7 +429,10 @@ export async function POST(request: Request) {
       rawBodySha256Prefix: crypto.createHash("sha256").update(rawBodyBuffer).digest("hex").slice(0, 10),
       receivedAt: new Date().toISOString(),
     });
-    return NextResponse.json({ error: "Invalid Meta webhook signature." }, { status: 401 });
+
+    if (!allowInvalidSignatureForTests) {
+      return NextResponse.json({ error: "Invalid Meta webhook signature." }, { status: 401 });
+    }
   }
 
   let payload: MetaWebhookPayload = {};
@@ -437,7 +442,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid webhook JSON payload." }, { status: 400 });
   }
 
-  const storedEventId = await storeWebhookEvent(payload, rawBody, signatureCheck.configured);
+  const storedEventId = await storeWebhookEvent(payload, rawBody, signatureCheck.valid);
   const inboxResult = await createInboxMessageFromWebhook(payload, storedEventId);
 
   console.log("Meta webhook received", {
