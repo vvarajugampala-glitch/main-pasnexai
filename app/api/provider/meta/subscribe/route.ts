@@ -98,7 +98,6 @@ export async function POST(request: Request) {
       [
         "messages",
         "messaging_postbacks",
-        "messaging_reads",
         "messaging_deliveries",
         "message_echoes",
       ].join(","),
