@@ -246,17 +246,37 @@ async function getBusinessContext(token: string) {
     throw new Error("Invalid session.");
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("business_id")
+    .select("business_id, email")
     .eq("id", user.id)
     .maybeSingle();
 
-  if (!profile?.business_id) {
-    throw new Error("Business profile not found.");
+  if (profileError) {
+    console.error("Inbox profile lookup failed", {
+      message: profileError.message,
+      details: profileError.details,
+      hint: profileError.hint,
+      code: profileError.code,
+      userId: user.id,
+      email: user.email,
+    });
+    throw new Error(profileError.message);
   }
 
-  return { supabase, businessId: profile.business_id };
+  if (profile?.business_id) {
+    return { supabase, businessId: profile.business_id };
+  }
+
+  const email = user.email ?? profile?.email ?? null;
+
+  console.error("Inbox business profile not found", {
+    userId: user.id,
+    email,
+    hasProfile: Boolean(profile),
+  });
+
+  throw new Error("Business profile not found.");
 }
 
 export async function GET(request: Request) {
