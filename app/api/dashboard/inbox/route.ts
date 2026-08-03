@@ -28,6 +28,56 @@ type ConversationWithLeadScore = {
     | null;
 };
 
+type InboxConversationRow = {
+  id: string;
+  status: string;
+  last_message_at: string | null;
+  created_at: string;
+  channels:
+    | {
+        type: string;
+        display_name: string | null;
+        status: string;
+        webhook_status: string | null;
+        access_token_encrypted: string | null;
+      }
+    | {
+        type: string;
+        display_name: string | null;
+        status: string;
+        webhook_status: string | null;
+        access_token_encrypted: string | null;
+      }[]
+    | null;
+  leads:
+    | {
+        id: string;
+        name: string | null;
+        status: string | null;
+        score: number | null;
+        interest: string | null;
+        next_action: string | null;
+      }
+    | {
+        id: string;
+        name: string | null;
+        status: string | null;
+        score: number | null;
+        interest: string | null;
+        next_action: string | null;
+      }[]
+    | null;
+};
+
+type InboxMessageRow = {
+  id: string;
+  conversation_id: string;
+  sender_type: string;
+  message_text: string;
+  ai_generated: boolean;
+  created_at: string;
+};
+
 function getLeadScore(conversation: ConversationWithLeadScore) {
   const lead = Array.isArray(conversation.leads) ? conversation.leads[0] : conversation.leads;
   return Number(lead?.score ?? 0);
@@ -220,19 +270,56 @@ export async function GET(request: Request) {
     const { supabase, businessId } = await getBusinessContext(token);
     const { data: conversations, error } = await supabase
       .from("conversations")
-      .select("id, status, last_message_at, created_at, channels(type, display_name, status, webhook_status, access_token_encrypted), leads(id, name, status, score, interest, next_action), messages(id, sender_type, message_text, ai_generated, created_at)")
+      .select("id, status, last_message_at, created_at, channels(type, display_name, status, webhook_status, access_token_encrypted), leads(id, name, status, score, interest, next_action)")
       .eq("business_id", businessId)
       .order("last_message_at", { ascending: false, nullsFirst: false });
 
     if (error) {
+      console.error("Inbox conversations query failed", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        businessId,
+      });
       throw new Error(error.message);
     }
 
-    const safeConversations = (conversations ?? []).map((conversation) => {
+    const conversationRows = (conversations ?? []) as InboxConversationRow[];
+    const conversationIds = conversationRows.map((conversation) => conversation.id);
+    const messagesByConversation = new Map<string, InboxMessageRow[]>();
+
+    if (conversationIds.length > 0) {
+      const { data: messages, error: messagesError } = await supabase
+        .from("messages")
+        .select("id, conversation_id, sender_type, message_text, ai_generated, created_at")
+        .in("conversation_id", conversationIds)
+        .order("created_at", { ascending: true });
+
+      if (messagesError) {
+        console.error("Inbox messages query failed", {
+          message: messagesError.message,
+          details: messagesError.details,
+          hint: messagesError.hint,
+          code: messagesError.code,
+          businessId,
+        });
+        throw new Error(messagesError.message);
+      }
+
+      for (const message of (messages ?? []) as InboxMessageRow[]) {
+        const existing = messagesByConversation.get(message.conversation_id) ?? [];
+        existing.push(message);
+        messagesByConversation.set(message.conversation_id, existing);
+      }
+    }
+
+    const safeConversations = conversationRows.map((conversation) => {
       const channel = Array.isArray(conversation.channels) ? conversation.channels[0] : conversation.channels;
 
       return {
         ...conversation,
+        messages: messagesByConversation.get(conversation.id) ?? [],
         channels: channel
           ? {
               type: channel.type,
