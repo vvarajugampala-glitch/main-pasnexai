@@ -58,6 +58,9 @@ export async function GET(request: Request) {
         verifyTokenConfigured: Boolean(process.env.META_WEBHOOK_VERIFY_TOKEN),
         tokenEncryptionConfigured: Boolean(process.env.PROVIDER_TOKEN_ENCRYPTION_KEY),
         webhookRoute: "/api/provider/meta/webhook",
+        vercelEnv: process.env.VERCEL_ENV ?? null,
+        gitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+        deploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? null,
       },
       },
       {

@@ -60,6 +60,9 @@ type ProviderReadinessMeta = {
   verifyTokenConfigured?: boolean;
   tokenEncryptionConfigured?: boolean;
   webhookRoute?: string;
+  vercelEnv?: string | null;
+  gitCommitSha?: string | null;
+  deploymentId?: string | null;
 };
 
 function formatDate(value: string) {
@@ -402,6 +405,16 @@ export function ProviderEventsViewer() {
               <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3">
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Callback URL</p>
                 <p className="mt-2 break-all text-sm font-black text-white">{metaReadiness?.callbackUrl ?? "Not loaded"}</p>
+              </article>
+              <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3 md:col-span-2 xl:col-span-4">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Live Deployment</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Env: <span className="font-black text-white">{metaReadiness?.vercelEnv ?? "unknown"}</span>
+                  <span className="mx-2 text-slate-600">|</span>
+                  Commit: <span className="font-black text-white">{metaReadiness?.gitCommitSha?.slice(0, 7) ?? "unknown"}</span>
+                  <span className="mx-2 text-slate-600">|</span>
+                  Deployment: <span className="font-black text-white">{metaReadiness?.deploymentId ?? "unknown"}</span>
+                </p>
               </article>
               <article className="rounded-lg border border-white/10 bg-[#030712]/70 p-3 md:col-span-2 xl:col-span-4">
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Diagnosis</p>
