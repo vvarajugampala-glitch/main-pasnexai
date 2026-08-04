@@ -96,7 +96,10 @@ function detectEventType(payload: MetaWebhookPayload) {
 }
 
 function getProviderAccountId(payload: MetaWebhookPayload) {
-  return payload.entry?.[0]?.id ?? null;
+  const entryId = payload.entry?.[0]?.id?.trim();
+  if (entryId && entryId !== "0") return entryId;
+
+  return getProviderAccountCandidates(payload)[0] ?? entryId ?? null;
 }
 
 function compactUnique(values: Array<string | null | undefined>) {
@@ -122,6 +125,8 @@ function getProviderAccountCandidates(payload: MetaWebhookPayload) {
         id?: string;
         page_id?: string;
         recipient_id?: string;
+        recipient?: { id?: string };
+        sender?: { id?: string };
       }
     | undefined;
   const messagingEvent = getMessagingEvent(payload);
@@ -129,6 +134,7 @@ function getProviderAccountCandidates(payload: MetaWebhookPayload) {
   return compactUnique([
     entry?.id,
     messagingEvent?.recipient?.id,
+    changeValue?.recipient?.id,
     changeValue?.id,
     changeValue?.page_id,
     changeValue?.recipient_id,
@@ -160,10 +166,17 @@ function getChannelTypeCandidates(payload: MetaWebhookPayload) {
 function extractMessageText(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
   const changeValue = entry?.changes?.[0]?.value as
-    | { messages?: unknown[]; text?: string; message?: string; comment_id?: string }
+    | {
+        messages?: unknown[];
+        text?: string;
+        message?: string | { text?: string };
+        comment_id?: string;
+      }
     | undefined;
   const whatsappMessage = changeValue?.messages?.[0] as { text?: { body?: string }; button?: { text?: string } } | undefined;
   const messagingEvent = getMessagingEvent(payload);
+  const changeMessageText =
+    typeof changeValue?.message === "string" ? changeValue.message : changeValue?.message?.text;
 
   return (
     whatsappMessage?.text?.body ||
@@ -171,27 +184,31 @@ function extractMessageText(payload: MetaWebhookPayload) {
     messagingEvent?.message?.text ||
     messagingEvent?.postback?.title ||
     changeValue?.text ||
-    changeValue?.message ||
+    changeMessageText ||
     "Provider webhook event received."
   );
 }
 
 function extractProviderMessageId(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
-  const changeValue = entry?.changes?.[0]?.value;
+  const changeValue = entry?.changes?.[0]?.value as
+    | { message?: { mid?: string; id?: string }; messages?: unknown[] }
+    | undefined;
   const whatsappMessage = changeValue?.messages?.[0] as { id?: string } | undefined;
   const messagingEvent = getMessagingEvent(payload);
 
-  return whatsappMessage?.id || messagingEvent?.message?.mid || null;
+  return whatsappMessage?.id || messagingEvent?.message?.mid || changeValue?.message?.mid || changeValue?.message?.id || null;
 }
 
 function extractProviderSenderId(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
-  const changeValue = entry?.changes?.[0]?.value;
+  const changeValue = entry?.changes?.[0]?.value as
+    | { sender?: { id?: string }; messages?: unknown[] }
+    | undefined;
   const whatsappMessage = changeValue?.messages?.[0] as { from?: string } | undefined;
   const messagingEvent = getMessagingEvent(payload);
 
-  return whatsappMessage?.from || messagingEvent?.sender?.id || null;
+  return whatsappMessage?.from || messagingEvent?.sender?.id || changeValue?.sender?.id || null;
 }
 
 async function updateConversationProviderMapping(conversationId: string, recipientId: string | null, eventId: string | null) {
@@ -260,7 +277,6 @@ async function updateWebhookProcessingStatus(eventId: string | null, status: str
 }
 
 async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventId: string | null) {
-  const providerAccountId = getProviderAccountId(payload);
   const providerAccountCandidates = getProviderAccountCandidates(payload);
 
   if (!providerAccountCandidates.length) {

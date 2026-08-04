@@ -153,9 +153,6 @@ export function ProviderEventsViewer() {
   ] as const;
   const preLiveGatePassed = productionGateChecks.filter(([label]) => label !== "Live dispatch").every(([, complete]) => complete);
   const latestRealWebhook = events.find((event) => event.event_type !== "meta.test" && !String(event.payload?.source ?? "").includes("admin_test"));
-  const latestWebhookAgeMinutes = latestRealWebhook
-    ? Math.max(0, Math.round((Date.now() - new Date(latestRealWebhook.created_at).getTime()) / 60000))
-    : null;
 
   const sendTestEvent = async () => {
     setIsSendingTest(true);
@@ -528,7 +525,6 @@ export function ProviderEventsViewer() {
               </p>
               <p className="md:col-span-3">
                 If a new Instagram DM is sent now and this timestamp does not change after Refresh Events, Meta did not deliver a webhook to Pasnex. Then check Meta app mode, tester role, webhook subscription, and Instagram messaging permissions.
-                {latestWebhookAgeMinutes !== null ? ` Last delivery was about ${latestWebhookAgeMinutes} minutes ago.` : ""}
               </p>
             </div>
           ) : (

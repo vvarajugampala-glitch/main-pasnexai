@@ -280,8 +280,15 @@ export function ChannelsLiveGrid() {
   useEffect(() => {
     let mounted = true;
 
-    setNotice(new URLSearchParams(window.location.search).get("message") ?? "");
-    restoreCachedDebugReports();
+    const initialNotice = new URLSearchParams(window.location.search).get("message") ?? "";
+    if (initialNotice) {
+      queueMicrotask(() => {
+        if (mounted) setNotice(initialNotice);
+      });
+    }
+    queueMicrotask(() => {
+      if (mounted) restoreCachedDebugReports();
+    });
 
     loadChannels().then((nextChannels) => {
       if (!mounted) return;
