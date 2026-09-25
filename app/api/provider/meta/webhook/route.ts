@@ -1,6 +1,12 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  buildProviderOutboundPlan,
+  dispatchMetaOutboundMessage,
+  type ProviderDispatchResult,
+  type ProviderOutboundInput,
+} from "@/lib/provider-outbound";
 
 const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
 const appSecret = process.env.META_APP_SECRET?.trim();
@@ -63,6 +69,13 @@ type MetaWebhookPayload = {
         messages?: unknown[];
         statuses?: unknown[];
         comments?: unknown[];
+        id?: string;
+        comment_id?: string;
+        text?: string;
+        message?: string | { text?: string };
+        from?: { id?: string; username?: string; name?: string };
+        media?: { id?: string };
+        post_id?: string;
         [key: string]: unknown;
       };
     }>;
@@ -117,6 +130,31 @@ function getMessagingEvent(payload: MetaWebhookPayload) {
     | undefined;
 }
 
+function extractCommentDetails(payload: MetaWebhookPayload) {
+  const changeValue = payload.entry?.[0]?.changes?.[0]?.value as
+    | {
+        id?: string;
+        comment_id?: string;
+        text?: string;
+        message?: string | { text?: string };
+        from?: { id?: string; username?: string; name?: string };
+        media?: { id?: string };
+        post_id?: string;
+      }
+    | undefined;
+
+  const changeMessageText =
+    typeof changeValue?.message === "string" ? changeValue.message : changeValue?.message?.text;
+
+  const commentId = changeValue?.comment_id || (changeValue?.text && changeValue?.id ? changeValue.id : null);
+  const commentText = changeValue?.text || changeMessageText || null;
+  const commenterId = changeValue?.from?.id || null;
+  const commenterName = changeValue?.from?.name || changeValue?.from?.username || "Instagram User";
+  const postId = changeValue?.media?.id || changeValue?.post_id || null;
+
+  return { commentId, commentText, commenterId, commenterName, postId };
+}
+
 function getProviderAccountCandidates(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
   const changeValue = entry?.changes?.[0]?.value as
@@ -153,8 +191,6 @@ function getChannelTypeCandidates(payload: MetaWebhookPayload) {
   if (payload.entry?.[0]?.changes?.[0]?.value?.messaging_product === "whatsapp") return ["whatsapp"];
   if (payload.object === "instagram") return ["instagram"];
 
-  // Meta can deliver Instagram/Messenger events under object: "page" depending on the product subscription.
-  // Prefer Instagram for Pasnex because the current live setup stores the Instagram business id as the channel handle.
   if (payload.object === "page" && payload.entry?.[0]?.messaging?.length) {
     return ["instagram", "messenger", "facebook"];
   }
@@ -203,12 +239,12 @@ function extractProviderMessageId(payload: MetaWebhookPayload) {
 function extractProviderSenderId(payload: MetaWebhookPayload) {
   const entry = payload.entry?.[0];
   const changeValue = entry?.changes?.[0]?.value as
-    | { sender?: { id?: string }; messages?: unknown[] }
+    | { sender?: { id?: string }; messages?: unknown[]; from?: { id?: string } }
     | undefined;
   const whatsappMessage = changeValue?.messages?.[0] as { from?: string } | undefined;
   const messagingEvent = getMessagingEvent(payload);
 
-  return whatsappMessage?.from || messagingEvent?.sender?.id || changeValue?.sender?.id || null;
+  return whatsappMessage?.from || messagingEvent?.sender?.id || changeValue?.from?.id || changeValue?.sender?.id || null;
 }
 
 async function updateConversationProviderMapping(conversationId: string, recipientId: string | null, eventId: string | null) {
@@ -226,7 +262,7 @@ async function updateConversationProviderMapping(conversationId: string, recipie
       .eq("id", conversationId);
   } catch (error) {
     console.warn(
-      "Provider recipient mapping skipped. Run docs/supabase-provider-outbound.sql before live outbound replies.",
+      "Provider recipient mapping skipped.",
       error instanceof Error ? error.message : error,
     );
   }
@@ -293,21 +329,49 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
     const channelTypeCandidates = getChannelTypeCandidates(payload);
     const { data: channels, error: channelError } = await supabase
       .from("channels")
-      .select("id, business_id, type, handle")
+      .select("id, business_id, type, handle, access_token_encrypted")
       .in("type", channelTypeCandidates)
       .in("handle", providerAccountCandidates)
       .order("connected_at", { ascending: false })
-      .returns<Array<{ id: string; business_id: string; type: string; handle: string | null }>>();
+      .returns<Array<{ id: string; business_id: string; type: string; handle: string | null; access_token_encrypted: string | null }>>();
 
     if (channelError) {
       throw new Error(channelError.message);
     }
 
-    const channel =
+    type ChannelRecord = { id: string; business_id: string; type: string; handle: string | null; access_token_encrypted: string | null };
+
+    let channel: ChannelRecord | null =
       channels?.find((item) => item.type === channelTypeCandidates[0]) ??
       channels?.find((item) => item.type === "instagram") ??
       channels?.[0] ??
       null;
+
+    if (!channel) {
+      const { data: fallbackChannels } = await supabase
+        .from("channels")
+        .select("id, business_id, type, handle, access_token_encrypted")
+        .in("type", channelTypeCandidates)
+        .order("connected_at", { ascending: false, nullsFirst: false })
+        .returns<Array<{ id: string; business_id: string; type: string; handle: string | null; access_token_encrypted: string | null }>>();
+
+      channel =
+        fallbackChannels?.find((item) => item.type === channelTypeCandidates[0]) ??
+        fallbackChannels?.find((item) => item.type === "instagram") ??
+        fallbackChannels?.[0] ??
+        null;
+
+      if (channel && providerAccountCandidates[0]) {
+        await supabase
+          .from("channels")
+          .update({
+            handle: providerAccountCandidates[0],
+            status: channel.access_token_encrypted ? "connected" : "ready_to_connect",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", channel.id);
+      }
+    }
 
     if (!channel) {
       await updateWebhookProcessingStatus(
@@ -318,17 +382,22 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
       return { processed: false, reason: "channel_mapping_not_found" };
     }
 
+    const providerSenderId = extractProviderSenderId(payload);
+    const commentDetails = extractCommentDetails(payload);
+    const incomingText = commentDetails.commentText || extractMessageText(payload);
+    const isCommentEvent = detectEventType(payload).includes("comments") || Boolean(commentDetails.commentId);
+
     const { data: lead, error: leadError } = await supabase
       .from("leads")
       .insert({
         business_id: channel.business_id,
         channel_id: channel.id,
-        name: "Provider Test Lead",
+        name: commentDetails.commenterName || "Instagram Visitor",
         source: channel.type,
         status: "qualified",
-        score: 78,
-        interest: "Provider webhook test message",
-        next_action: "Review mapped provider event in inbox",
+        score: 80,
+        interest: incomingText.slice(0, 100),
+        next_action: isCommentEvent ? "Respond via Instagram DM" : "Review mapped provider event in inbox",
       })
       .select("id")
       .maybeSingle<{ id: string }>();
@@ -353,44 +422,142 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
       throw new Error(conversationError?.message ?? "Conversation was not created.");
     }
 
-    const providerSenderId = extractProviderSenderId(payload);
     const providerMessageId = extractProviderMessageId(payload);
     await updateConversationProviderMapping(conversation.id, providerSenderId, eventId);
 
-    const { error: messageError } = await supabase.from("messages").insert({
+    await supabase.from("messages").insert({
       conversation_id: conversation.id,
       sender_type: "customer",
-      message_text: `[Provider test event] ${extractMessageText(payload)}`,
+      message_text: incomingText,
       ai_generated: false,
       provider_message_id: providerMessageId,
       delivery_status: "received",
     });
 
-    if (messageError) {
-      const { error: fallbackMessageError } = await supabase.from("messages").insert({
+    // --- AUTOMATION MATCHING & EXECUTION ---
+    const { data: automations } = await supabase
+      .from("automations")
+      .select("id, name, trigger_type, config_json")
+      .eq("business_id", channel.business_id)
+      .eq("status", "active");
+
+    const matchedAutomation = automations?.find((automation) => {
+      const config = (automation.config_json ?? {}) as {
+        keyword?: string;
+        post_id?: string;
+      };
+
+      if (isCommentEvent) {
+        if (!["comment_received", "comment_to_dm", "keyword_or_message"].includes(automation.trigger_type)) {
+          return false;
+        }
+      } else {
+        if (!["message_received", "keyword_or_message", "ai_chat_started"].includes(automation.trigger_type)) {
+          return false;
+        }
+      }
+
+      if (config.post_id && commentDetails.postId && config.post_id !== commentDetails.postId) {
+        return false;
+      }
+
+      if (config.keyword && config.keyword !== "*") {
+        return incomingText.toLowerCase().includes(config.keyword.toLowerCase());
+      }
+
+      return true;
+    });
+
+    let automationResult: { executed: boolean; automationName?: string; dispatchStatus?: string } = { executed: false };
+
+    if (matchedAutomation) {
+      const config = (matchedAutomation.config_json ?? {}) as {
+        automated_dm?: string;
+        response_message?: string;
+        dm_text?: string;
+      };
+
+      const replyText =
+        config.automated_dm ||
+        config.response_message ||
+        config.dm_text ||
+        "Thanks for your comment! We've sent you a direct message.";
+
+      const outboundInput: ProviderOutboundInput = {
+        channelType: channel.type,
+        providerAccountId: channel.handle,
+        recipientId: providerSenderId,
+        commentId: commentDetails.commentId,
+        messageText: replyText,
+      };
+
+      const outboundPlan = buildProviderOutboundPlan(outboundInput);
+      let dispatchResult: ProviderDispatchResult = {
+        attempted: false,
+        sent: false,
+        status: "disabled",
+        providerMessageId: null,
+        response: null,
+        error: channel.access_token_encrypted ? "Live provider dispatch disabled via env" : "Channel access token missing",
+      };
+
+      if (channel.access_token_encrypted && outboundPlan.ready) {
+        dispatchResult = await dispatchMetaOutboundMessage({
+          outboundPlan,
+          encryptedAccessToken: channel.access_token_encrypted,
+        });
+      }
+
+      await supabase.from("provider_outbound_messages").insert({
+        business_id: channel.business_id,
         conversation_id: conversation.id,
-        sender_type: "customer",
-        message_text: `[Provider test event] ${extractMessageText(payload)}`,
-        ai_generated: false,
+        channel_id: channel.id,
+        provider: "meta",
+        channel_type: channel.type,
+        recipient_id: providerSenderId || commentDetails.commentId,
+        endpoint: outboundPlan.endpoint,
+        payload: outboundPlan.payload ?? {},
+        status: dispatchResult.status,
+        provider_response: dispatchResult.response ?? {},
+        error_message: dispatchResult.error,
+        sent_at: dispatchResult.sent ? new Date().toISOString() : null,
       });
 
-      if (fallbackMessageError) {
-        throw new Error(fallbackMessageError.message);
-      }
+      await supabase.from("messages").insert({
+        conversation_id: conversation.id,
+        sender_type: "ai",
+        message_text: replyText,
+        ai_generated: true,
+        provider_message_id: dispatchResult.providerMessageId,
+        delivery_status: dispatchResult.status,
+      });
+
+      automationResult = {
+        executed: true,
+        automationName: matchedAutomation.name,
+        dispatchStatus: dispatchResult.status,
+      };
     }
 
     if (eventId) {
       await updateWebhookProcessingStatus(
         eventId,
-        "processed",
-        providerSenderId
-          ? `Inbox conversation created and recipient id ${providerSenderId} mapped for outbound replies.`
-          : "Inbox conversation created. Recipient id was not found in the provider payload.",
+        matchedAutomation ? "automation_executed" : "processed",
+        matchedAutomation
+          ? `Automation "${matchedAutomation.name}" executed. Outbound dispatch status: ${automationResult.dispatchStatus}.`
+          : providerSenderId
+            ? `Inbox conversation created and recipient id ${providerSenderId} mapped.`
+            : "Inbox conversation created.",
         true,
       );
     }
 
-    return { processed: true, reason: "conversation_created", recipientMapped: Boolean(providerSenderId) };
+    return {
+      processed: true,
+      reason: "conversation_created",
+      recipientMapped: Boolean(providerSenderId),
+      automationResult,
+    };
   } catch (error) {
     console.warn("Meta webhook inbox pipeline skipped", error instanceof Error ? error.message : error);
     await updateWebhookProcessingStatus(

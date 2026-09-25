@@ -158,40 +158,60 @@ export default function LoginPage() {
                 Login is available after first-time registration and email verification.
               </p>
 
-              <form onSubmit={handleLogin} className="mt-8 grid gap-4">
-                <input className={fieldClass} type="email" placeholder="Work email" value={email} onChange={(event) => setEmail(event.target.value)} required />
-                <input className={fieldClass} type="password" placeholder="Password" value={password} onChange={(event) => setPassword(event.target.value)} required />
-                <div className="flex items-center justify-between text-sm">
-                  <label className="flex items-center gap-2 text-slate-400">
-                    <input type="checkbox" className="h-4 w-4 rounded border-white/10 bg-[#030712]" />
-                    Remember me
-                  </label>
-                  <Link href="/forgot-password" className="font-semibold text-blue-300 transition hover:text-white">
-                    Forgot password?
-                  </Link>
-                </div>
-                {message && (
-                  <div className={`rounded-lg border p-3 text-sm leading-6 ${status === "pending" ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-red-400/25 bg-red-400/10 text-red-100"}`}>
-                    {message}
+              <div className="mt-8 space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Primary Option</span>
+                    <span className="rounded-full border border-blue-400/30 bg-blue-400/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-300">
+                      Recommended
+                    </span>
                   </div>
-                )}
-                <button
-                  type="submit"
-                  disabled={status === "loading"}
-                  className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-6 py-3 text-center text-sm font-bold text-white shadow-[0_0_30px_rgba(37,99,235,.3)] transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {status === "loading" ? "Checking access..." : "Login to Dashboard"}
-                </button>
-                <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    disabled={status === "loading"}
+                    className="flex w-full items-center justify-center gap-3 rounded-lg border border-white/20 bg-white px-6 py-3.5 text-sm font-bold text-slate-900 shadow-[0_14px_35px_rgba(0,0,0,.18)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(37,99,235,.25)] disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <FcGoogle className="h-5 w-5" />
+                    Continue with Google
+                  </button>
+                  <p className="mt-2 text-center text-xs text-slate-400">
+                    Fastest 1-click access to your multi-channel workspace
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   <span className="h-px flex-1 bg-white/10" />
-                  or
+                  or sign in with work email
                   <span className="h-px flex-1 bg-white/10" />
                 </div>
-                <button type="button" onClick={handleGoogleLogin} disabled={status === "loading"} className="inline-flex items-center justify-center gap-3 rounded-lg border border-white/10 bg-white px-6 py-3 text-sm font-bold text-slate-900 shadow-[0_14px_35px_rgba(0,0,0,.18)] transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(37,99,235,.18)] disabled:cursor-not-allowed disabled:opacity-70">
-                  <FcGoogle className="h-5 w-5" />
-                  Continue with Google
-                </button>
-              </form>
+
+                <form onSubmit={handleLogin} className="grid gap-4">
+                  <input className={fieldClass} type="email" placeholder="Work email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+                  <input className={fieldClass} type="password" placeholder="Password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+                  <div className="flex items-center justify-between text-sm">
+                    <label className="flex items-center gap-2 text-slate-400">
+                      <input type="checkbox" className="h-4 w-4 rounded border-white/10 bg-[#030712]" />
+                      Remember me
+                    </label>
+                    <Link href="/forgot-password" className="font-semibold text-blue-300 transition hover:text-white">
+                      Forgot password?
+                    </Link>
+                  </div>
+                  {message && (
+                    <div className={`rounded-lg border p-3 text-sm leading-6 ${status === "pending" ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-red-400/25 bg-red-400/10 text-red-100"}`}>
+                      {message}
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={status === "loading"}
+                    className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-6 py-3 text-center text-sm font-bold text-white shadow-[0_0_30px_rgba(37,99,235,.3)] transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {status === "loading" ? "Checking access..." : "Login with Email"}
+                  </button>
+                </form>
+              </div>
 
               <div className="mt-6 rounded-lg border border-blue-400/15 bg-blue-400/10 p-4 text-sm leading-6 text-blue-100">
                 First-time login opens onboarding. After onboarding is completed, future logins open your dashboard.

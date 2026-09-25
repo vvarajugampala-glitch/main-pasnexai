@@ -6,6 +6,7 @@ export type ProviderOutboundInput = {
   channelType: ProviderChannelType;
   providerAccountId?: string | null;
   recipientId?: string | null;
+  commentId?: string | null;
   messageText: string;
 };
 
@@ -39,7 +40,11 @@ function getMetaEndpoint(channelType: ProviderChannelType, providerAccountId?: s
     return `/${providerAccountId}/messages`;
   }
 
-  if (channelType === "instagram" || channelType === "facebook" || channelType === "messenger") {
+  if (channelType === "instagram") {
+    return `/me/messages`;
+  }
+
+  if (channelType === "facebook" || channelType === "messenger") {
     return `/${providerAccountId}/messages`;
   }
 
@@ -47,9 +52,8 @@ function getMetaEndpoint(channelType: ProviderChannelType, providerAccountId?: s
 }
 
 function getMetaPayload(input: ProviderOutboundInput) {
-  if (!input.recipientId) return null;
-
   if (input.channelType === "whatsapp") {
+    if (!input.recipientId) return null;
     return {
       messaging_product: "whatsapp",
       to: input.recipientId,
@@ -58,7 +62,24 @@ function getMetaPayload(input: ProviderOutboundInput) {
     };
   }
 
-  if (input.channelType === "instagram" || input.channelType === "facebook" || input.channelType === "messenger") {
+  if (input.channelType === "instagram") {
+    if (input.commentId) {
+      return {
+        recipient: { comment_id: input.commentId },
+        message: { text: input.messageText },
+      };
+    }
+    if (input.recipientId) {
+      return {
+        recipient: { id: input.recipientId },
+        message: { text: input.messageText },
+      };
+    }
+    return null;
+  }
+
+  if (input.channelType === "facebook" || input.channelType === "messenger") {
+    if (!input.recipientId) return null;
     return {
       recipient: { id: input.recipientId },
       message: { text: input.messageText },
@@ -101,7 +122,7 @@ export function buildProviderOutboundPlan(input: ProviderOutboundInput): Provide
       endpoint,
       payload: null,
       ready: false,
-      blocker: "Recipient id is missing. Incoming webhook mapping must store the customer sender id before outbound replies can be sent.",
+      blocker: "Recipient id or comment id is missing. Incoming webhook mapping must store commenter id or comment id before outbound replies can be sent.",
     };
   }
 

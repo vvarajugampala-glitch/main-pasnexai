@@ -278,70 +278,94 @@ export default function RegisterPage() {
                   : "New users register, verify their email, complete onboarding, and enter the Pasnex.ai workspace without waiting for manual approval."}
               </p>
 
-              <form onSubmit={handleSubmit} className="mt-8 grid gap-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <input className={fieldClass} placeholder="Full name" value={formState.fullName} onChange={(event) => updateField("fullName", event.target.value)} required />
-                  <input className={fieldClass} placeholder="Business name" value={formState.businessName} onChange={(event) => updateField("businessName", event.target.value)} required />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                  <input className={fieldClass} type="email" placeholder="Work email" value={formState.email} onChange={(event) => updateField("email", event.target.value)} required />
-                  <button
-                    type="button"
-                    onClick={sendOtp}
-                    disabled={status === "sending" || resendSeconds > 0 || emailVerified}
-                    className="rounded-lg border border-blue-400/30 bg-blue-400/10 px-5 py-3 text-sm font-bold text-blue-100 transition hover:border-blue-300/60 hover:bg-blue-400/15 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {emailVerified ? "Verified" : status === "sending" ? "Sending..." : resendSeconds > 0 ? `${resendSeconds}s` : "Verify"}
-                  </button>
-                </div>
+              <div className="mt-8 space-y-4">
                 {!isGoogleRegistration && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Primary Option</span>
+                      <span className="rounded-full border border-blue-400/30 bg-blue-400/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-300">
+                        Recommended
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      disabled={status === "loading"}
+                      className="flex w-full items-center justify-center gap-3 rounded-lg border border-white/20 bg-white px-6 py-3.5 text-sm font-bold text-slate-900 shadow-[0_14px_35px_rgba(0,0,0,.18)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(37,99,235,.25)] disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <FcGoogle className="h-5 w-5" />
+                      Continue with Google
+                    </button>
+                    <p className="mt-2 text-center text-xs text-slate-400">
+                      Instant signup — bypasses manual email verification
+                    </p>
+                  </div>
+                )}
+
+                {!isGoogleRegistration && (
+                  <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <span className="h-px flex-1 bg-white/10" />
+                    or register with work email
+                    <span className="h-px flex-1 bg-white/10" />
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="grid gap-4">
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <input className={fieldClass} type="password" placeholder="Password" value={formState.password} onChange={(event) => updateField("password", event.target.value)} minLength={8} required />
-                    <input className={fieldClass} type="password" placeholder="Confirm password" value={formState.confirmPassword} onChange={(event) => updateField("confirmPassword", event.target.value)} minLength={8} required />
+                    <input className={fieldClass} placeholder="Full name" value={formState.fullName} onChange={(event) => updateField("fullName", event.target.value)} required />
+                    <input className={fieldClass} placeholder="Business name" value={formState.businessName} onChange={(event) => updateField("businessName", event.target.value)} required />
                   </div>
-                )}
-                <select className={fieldClass} value={formState.primaryChannel} onChange={(event) => updateField("primaryChannel", event.target.value)} required>
-                  <option value="" disabled>Primary automation channel</option>
-                  <option>Instagram</option>
-                  <option>WhatsApp</option>
-                  <option>Facebook Messenger</option>
-                  <option>Multiple channels</option>
-                </select>
-                {(message || verificationLinkSent) && (
-                  <div className={`rounded-lg border p-3 text-sm leading-6 ${status === "error" ? "border-red-400/25 bg-red-400/10 text-red-100" : emailVerified ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-blue-400/25 bg-blue-400/10 text-blue-100"}`}>
-                    <p>{message || "Verification link sent to your email."}</p>
-                    {verificationLinkSent && (
-                      <div className="mt-3 flex flex-wrap items-center gap-3">
-                        <span className="text-xs text-slate-300">Open the email link. It will bring you back here to finish registration.</span>
-                        <button
-                          type="button"
-                          onClick={sendOtp}
-                          disabled={status === "sending" || resendSeconds > 0}
-                          className="rounded-lg border border-blue-300/25 bg-white/[0.05] px-3 py-1.5 text-xs font-bold text-blue-100 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {status === "sending" ? "Resending..." : resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend link"}
-                        </button>
-                      </div>
-                    )}
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <input className={fieldClass} type="email" placeholder="Work email" value={formState.email} onChange={(event) => updateField("email", event.target.value)} required />
+                    <button
+                      type="button"
+                      onClick={sendOtp}
+                      disabled={status === "sending" || resendSeconds > 0 || emailVerified}
+                      className="rounded-lg border border-blue-400/30 bg-blue-400/10 px-5 py-3 text-sm font-bold text-blue-100 transition hover:border-blue-300/60 hover:bg-blue-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {emailVerified ? "Verified" : status === "sending" ? "Sending..." : resendSeconds > 0 ? `${resendSeconds}s` : "Verify"}
+                    </button>
                   </div>
-                )}
-                <button
-                  type="submit"
-                  disabled={status === "loading"}
-                  className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-6 py-3 text-center text-sm font-bold text-white shadow-[0_0_30px_rgba(37,99,235,.3)] transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {status === "loading" ? "Creating account..." : "Register & Start Onboarding"}
-                </button>
-                <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  <span className="h-px flex-1 bg-white/10" />
-                  or
-                  <span className="h-px flex-1 bg-white/10" />
-                </div>
-                <button type="button" onClick={handleGoogleLogin} disabled={status === "loading"} className="inline-flex items-center justify-center gap-3 rounded-lg border border-white/10 bg-white px-6 py-3 text-sm font-bold text-slate-900 shadow-[0_14px_35px_rgba(0,0,0,.18)] transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(37,99,235,.18)] disabled:cursor-not-allowed disabled:opacity-70">
-                  <FcGoogle className="h-5 w-5" />
-                  Continue with Google
-                </button>
-              </form>
+                  {!isGoogleRegistration && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <input className={fieldClass} type="password" placeholder="Password" value={formState.password} onChange={(event) => updateField("password", event.target.value)} minLength={8} required />
+                      <input className={fieldClass} type="password" placeholder="Confirm password" value={formState.confirmPassword} onChange={(event) => updateField("confirmPassword", event.target.value)} minLength={8} required />
+                    </div>
+                  )}
+                  <select className={fieldClass} value={formState.primaryChannel} onChange={(event) => updateField("primaryChannel", event.target.value)} required>
+                    <option value="" disabled>Primary automation channel</option>
+                    <option>Instagram</option>
+                    <option>WhatsApp</option>
+                    <option>Facebook Messenger</option>
+                    <option>Multiple channels</option>
+                  </select>
+                  {(message || verificationLinkSent) && (
+                    <div className={`rounded-lg border p-3 text-sm leading-6 ${status === "error" ? "border-red-400/25 bg-red-400/10 text-red-100" : emailVerified ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-blue-400/25 bg-blue-400/10 text-blue-100"}`}>
+                      <p>{message || "Verification link sent to your email."}</p>
+                      {verificationLinkSent && (
+                        <div className="mt-3 flex flex-wrap items-center gap-3">
+                          <span className="text-xs text-slate-300">Open the email link. It will bring you back here to finish registration.</span>
+                          <button
+                            type="button"
+                            onClick={sendOtp}
+                            disabled={status === "sending" || resendSeconds > 0}
+                            className="rounded-lg border border-blue-300/25 bg-white/[0.05] px-3 py-1.5 text-xs font-bold text-blue-100 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {status === "sending" ? "Resending..." : resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend link"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={status === "loading"}
+                    className="rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 px-6 py-3 text-center text-sm font-bold text-white shadow-[0_0_30px_rgba(37,99,235,.3)] transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {status === "loading" ? "Creating account..." : "Register & Start Onboarding"}
+                  </button>
+                </form>
+              </div>
 
               <p className="mt-6 text-center text-sm text-slate-400">
                 Email already verified?{" "}
