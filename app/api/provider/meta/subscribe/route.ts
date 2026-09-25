@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     const accessToken = decryptProviderToken(channel.access_token_encrypted);
     const page = await readPageFromToken(accessToken);
     const subscribeUrl = new URL(`${getGraphApiBaseUrl()}/${page.id}/subscribed_apps`);
-    const subscribedFields = channelType === "facebook" ? "feed,messages" : "messages";
+    const subscribedFields = channelType === "facebook" || channelType === "messenger" ? "feed,messages" : "messages";
     subscribeUrl.searchParams.set("access_token", accessToken);
     subscribeUrl.searchParams.set("subscribed_fields", subscribedFields);
 
