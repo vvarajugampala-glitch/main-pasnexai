@@ -140,19 +140,23 @@ function extractCommentDetails(payload: MetaWebhookPayload) {
         from?: { id?: string; username?: string; name?: string };
         media?: { id?: string };
         post_id?: string;
+        item?: string;
+        verb?: string;
       }
     | undefined;
 
   const changeMessageText =
     typeof changeValue?.message === "string" ? changeValue.message : changeValue?.message?.text;
 
-  const commentId = changeValue?.comment_id || (changeValue?.text && changeValue?.id ? changeValue.id : null);
+  const isComment = changeValue?.item === "comment" || Boolean(changeValue?.comment_id) || Boolean(changeValue?.text && changeValue?.id);
+  const commentId = changeValue?.comment_id || (isComment ? changeValue?.id : null) || null;
   const commentText = changeValue?.text || changeMessageText || null;
   const commenterId = changeValue?.from?.id || null;
-  const commenterName = changeValue?.from?.name || changeValue?.from?.username || "Instagram User";
-  const postId = changeValue?.media?.id || changeValue?.post_id || null;
+  const defaultUser = payload.object === "instagram" ? "Instagram User" : "Facebook User";
+  const commenterName = changeValue?.from?.name || changeValue?.from?.username || defaultUser;
+  const postId = changeValue?.post_id || changeValue?.media?.id || null;
 
-  return { commentId, commentText, commenterId, commenterName, postId };
+  return { commentId, commentText, commenterId, commenterName, postId, isComment };
 }
 
 function getProviderAccountCandidates(payload: MetaWebhookPayload) {
@@ -192,10 +196,10 @@ function getChannelTypeCandidates(payload: MetaWebhookPayload) {
   if (payload.object === "instagram") return ["instagram"];
 
   if (payload.object === "page" && payload.entry?.[0]?.messaging?.length) {
-    return ["instagram", "messenger", "facebook"];
+    return ["facebook", "messenger", "instagram"];
   }
 
-  if (payload.object === "page") return ["facebook", "instagram", "messenger"];
+  if (payload.object === "page") return ["facebook", "messenger", "instagram"];
   return [getChannelType(payload)];
 }
 
@@ -385,19 +389,25 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
     const providerSenderId = extractProviderSenderId(payload);
     const commentDetails = extractCommentDetails(payload);
     const incomingText = commentDetails.commentText || extractMessageText(payload);
-    const isCommentEvent = detectEventType(payload).includes("comments") || Boolean(commentDetails.commentId);
+    const isCommentEvent = detectEventType(payload).includes("comments") || detectEventType(payload).includes("feed") || commentDetails.isComment || Boolean(commentDetails.commentId);
+
+    const nextAction = isCommentEvent
+      ? channel.type === "facebook"
+        ? "Respond via Facebook Messenger DM"
+        : "Respond via Instagram DM"
+      : "Review mapped provider event in inbox";
 
     const { data: lead, error: leadError } = await supabase
       .from("leads")
       .insert({
         business_id: channel.business_id,
         channel_id: channel.id,
-        name: commentDetails.commenterName || "Instagram Visitor",
+        name: commentDetails.commenterName || (channel.type === "facebook" ? "Facebook Visitor" : "Instagram Visitor"),
         source: channel.type,
         status: "qualified",
         score: 80,
         interest: incomingText.slice(0, 100),
-        next_action: isCommentEvent ? "Respond via Instagram DM" : "Review mapped provider event in inbox",
+        next_action: nextAction,
       })
       .select("id")
       .maybeSingle<{ id: string }>();
@@ -445,7 +455,12 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
       const config = (automation.config_json ?? {}) as {
         keyword?: string;
         post_id?: string;
+        channel_type?: string;
       };
+
+      if (config.channel_type && config.channel_type !== "all" && config.channel_type !== channel.type) {
+        return false;
+      }
 
       if (isCommentEvent) {
         if (!["comment_received", "comment_to_dm", "keyword_or_message"].includes(automation.trigger_type)) {

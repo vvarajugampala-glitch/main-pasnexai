@@ -45,7 +45,7 @@ function getMetaEndpoint(channelType: ProviderChannelType, providerAccountId?: s
   }
 
   if (channelType === "facebook" || channelType === "messenger") {
-    return `/${providerAccountId}/messages`;
+    return `/me/messages`;
   }
 
   return null;
@@ -79,11 +79,19 @@ function getMetaPayload(input: ProviderOutboundInput) {
   }
 
   if (input.channelType === "facebook" || input.channelType === "messenger") {
-    if (!input.recipientId) return null;
-    return {
-      recipient: { id: input.recipientId },
-      message: { text: input.messageText },
-    };
+    if (input.commentId) {
+      return {
+        recipient: { comment_id: input.commentId },
+        message: { text: input.messageText },
+      };
+    }
+    if (input.recipientId) {
+      return {
+        recipient: { id: input.recipientId },
+        message: { text: input.messageText },
+      };
+    }
+    return null;
   }
 
   return null;
