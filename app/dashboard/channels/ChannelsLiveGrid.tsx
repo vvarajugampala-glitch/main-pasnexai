@@ -737,7 +737,7 @@ export function ChannelsLiveGrid() {
                 {busyType === `oauth-${channel.type}` ? "Opening Meta..." : "Start Meta OAuth"}
               </button>
             )}
-            {prepared && channel.type === "instagram" && !channel.id.startsWith("template-") && (
+            {prepared && ["instagram", "facebook", "messenger"].includes(channel.type) && !channel.id.startsWith("template-") && (
               <button
                 type="button"
                 onClick={() => void debugMetaAccounts(channel)}
@@ -747,7 +747,7 @@ export function ChannelsLiveGrid() {
                 {busyType === `debug-${channel.id}` ? "Checking Meta..." : "Debug Meta Pages"}
               </button>
             )}
-            {prepared && channel.type === "instagram" && !channel.id.startsWith("template-") && (
+            {prepared && ["instagram", "facebook", "messenger"].includes(channel.type) && !channel.id.startsWith("template-") && (
               <button
                 type="button"
                 onClick={() => void subscribeMetaWebhooks(channel)}
