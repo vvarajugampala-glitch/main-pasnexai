@@ -42,3 +42,5 @@ next-env.d.ts
 backups/
 *.zip
 scratch/
+# Local verify token
+WEBHOOK_VERIFY_TOKEN_FOR_META.txt
