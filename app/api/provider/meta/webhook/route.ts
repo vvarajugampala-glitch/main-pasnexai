@@ -458,7 +458,13 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
         channel_type?: string;
       };
 
-      if (config.channel_type && config.channel_type !== "all" && config.channel_type !== channel.type) {
+      const isMetaPageChannel = (type?: string) => type === "facebook" || type === "messenger";
+      if (
+        config.channel_type &&
+        config.channel_type !== "all" &&
+        config.channel_type !== channel.type &&
+        !(isMetaPageChannel(config.channel_type) && isMetaPageChannel(channel.type))
+      ) {
         return false;
       }
 
