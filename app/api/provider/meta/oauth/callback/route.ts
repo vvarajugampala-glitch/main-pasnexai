@@ -115,20 +115,119 @@ async function fetchMetaGrantedScopes(userAccessToken: string) {
   };
 }
 
-async function resolveMetaChannelAccount(
-  channelType: string,
+type MetaWhatsAppPhoneNumber = {
+  id?: string;
+  display_phone_number?: string;
+  verified_name?: string;
+};
+
+type MetaWABA = {
+  id?: string;
+  name?: string;
+  phone_numbers?: {
+    data?: MetaWhatsAppPhoneNumber[];
+  };
+};
+
+type MetaWABAResponse = {
+  data?: MetaWABA[];
+  error?: {
+    message?: string;
+  };
+};
+
+async function resolveWhatsAppChannelAccount(
   userAccessToken: string,
   requestedScopes: string[],
   usedConfigId: boolean,
+  permissionDebug: { grantedScopes: string[]; declinedScopes: string[]; permissionsError: string | null },
 ): Promise<ResolvedMetaChannelAccount> {
-  const permissionDebug = await fetchMetaGrantedScopes(userAccessToken);
+  try {
+    let wabaList: MetaWABA[] = [];
 
-  if (channelType === "whatsapp") {
+    const clientWabaUrl = new URL(`${getGraphApiBaseUrl()}/me/client_whatsapp_business_accounts`);
+    clientWabaUrl.searchParams.set("fields", "id,name,phone_numbers{id,display_phone_number,verified_name}");
+    clientWabaUrl.searchParams.set("access_token", userAccessToken);
+
+    const clientResponse = await fetch(clientWabaUrl);
+    const clientResult = (await clientResponse.json().catch(() => ({}))) as MetaWABAResponse;
+
+    if (clientResponse.ok && clientResult.data?.length) {
+      wabaList = clientResult.data;
+    } else {
+      const wabaUrl = new URL(`${getGraphApiBaseUrl()}/me/whatsapp_business_accounts`);
+      wabaUrl.searchParams.set("fields", "id,name,phone_numbers{id,display_phone_number,verified_name}");
+      wabaUrl.searchParams.set("access_token", userAccessToken);
+
+      const wabaResponse = await fetch(wabaUrl);
+      const wabaResult = (await wabaResponse.json().catch(() => ({}))) as MetaWABAResponse;
+
+      if (wabaResponse.ok && wabaResult.data?.length) {
+        wabaList = wabaResult.data;
+      }
+    }
+
+    let detectedPhoneNumber: MetaWhatsAppPhoneNumber | null = null;
+    let detectedWabaId: string | null = null;
+
+    for (const waba of wabaList) {
+      if (waba.phone_numbers?.data?.length) {
+        detectedWabaId = waba.id ?? null;
+        detectedPhoneNumber = waba.phone_numbers.data[0];
+        break;
+      }
+
+      if (waba.id) {
+        const phoneUrl = new URL(`${getGraphApiBaseUrl()}/${waba.id}/phone_numbers`);
+        phoneUrl.searchParams.set("fields", "id,display_phone_number,verified_name");
+        phoneUrl.searchParams.set("access_token", userAccessToken);
+
+        const phoneResponse = await fetch(phoneUrl);
+        const phoneResult = (await phoneResponse.json().catch(() => ({}))) as { data?: MetaWhatsAppPhoneNumber[] };
+
+        if (phoneResponse.ok && phoneResult.data?.length) {
+          detectedWabaId = waba.id;
+          detectedPhoneNumber = phoneResult.data[0];
+          break;
+        }
+      }
+    }
+
+    const providerAccountId = detectedPhoneNumber?.id ?? null;
+    const displayName =
+      detectedPhoneNumber?.display_phone_number ||
+      detectedPhoneNumber?.verified_name ||
+      (detectedWabaId ? `WABA ${detectedWabaId}` : "WhatsApp");
+    const note = providerAccountId
+      ? "WhatsApp Business account and Phone Number ID resolved automatically."
+      : wabaList.length
+        ? "WhatsApp OAuth token stored, but no connected WhatsApp Phone Number ID was returned. Check WhatsApp Cloud API phone configuration."
+        : "WhatsApp OAuth token stored, but no WABA accounts were returned. Check WhatsApp Cloud API permissions.";
+
+    return {
+      providerAccountId,
+      displayName,
+      accessToken: userAccessToken,
+      note,
+      debug: {
+        pageCount: 0,
+        pagesWithInstagram: 0,
+        detectedPageId: detectedWabaId,
+        detectedPageName: displayName,
+        requestedScopes,
+        grantedScopes: permissionDebug.grantedScopes,
+        declinedScopes: permissionDebug.declinedScopes,
+        usedConfigId,
+        accountsResponse: { wabaCount: wabaList.length, detectedPhoneNumber },
+        permissionsError: permissionDebug.permissionsError,
+      },
+    };
+  } catch (error) {
     return {
       providerAccountId: null,
       displayName: "WhatsApp",
       accessToken: userAccessToken,
-      note: "WhatsApp OAuth token stored. Add phone number ID after WhatsApp Cloud API approval.",
+      note: `WhatsApp OAuth token stored, but WABA resolution failed: ${error instanceof Error ? error.message : "Unknown error"}.`,
       debug: {
         pageCount: 0,
         pagesWithInstagram: 0,
@@ -142,6 +241,19 @@ async function resolveMetaChannelAccount(
         permissionsError: permissionDebug.permissionsError,
       },
     };
+  }
+}
+
+async function resolveMetaChannelAccount(
+  channelType: string,
+  userAccessToken: string,
+  requestedScopes: string[],
+  usedConfigId: boolean,
+): Promise<ResolvedMetaChannelAccount> {
+  const permissionDebug = await fetchMetaGrantedScopes(userAccessToken);
+
+  if (channelType === "whatsapp") {
+    return resolveWhatsAppChannelAccount(userAccessToken, requestedScopes, usedConfigId, permissionDebug);
   }
 
   const accountsUrl = new URL(`${getGraphApiBaseUrl()}/me/accounts`);
