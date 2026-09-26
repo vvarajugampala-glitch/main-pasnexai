@@ -195,11 +195,19 @@ function getChannelTypeCandidates(payload: MetaWebhookPayload) {
   if (payload.entry?.[0]?.changes?.[0]?.value?.messaging_product === "whatsapp") return ["whatsapp"];
   if (payload.object === "instagram") return ["instagram"];
 
-  if (payload.object === "page" && payload.entry?.[0]?.messaging?.length) {
-    return ["facebook", "messenger", "instagram"];
+  const messagingEvent = getMessagingEvent(payload);
+  const mid = messagingEvent?.message?.mid;
+  const isInstagramMessaging = Boolean(mid && (mid.startsWith("aWdf") || mid.includes("ig_") || mid.startsWith("IG")));
+
+  if (isInstagramMessaging) {
+    return ["instagram"];
   }
 
-  if (payload.object === "page") return ["facebook", "messenger", "instagram"];
+  if (payload.object === "page" && payload.entry?.[0]?.messaging?.length) {
+    return ["messenger", "facebook"];
+  }
+
+  if (payload.object === "page") return ["facebook", "messenger"];
   return [getChannelType(payload)];
 }
 
@@ -345,11 +353,17 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
 
     type ChannelRecord = { id: string; business_id: string; type: string; handle: string | null; access_token_encrypted: string | null };
 
-    let channel: ChannelRecord | null =
-      channels?.find((item) => item.type === channelTypeCandidates[0]) ??
-      channels?.find((item) => item.type === "instagram") ??
-      channels?.[0] ??
-      null;
+    let channel: ChannelRecord | null = null;
+    for (const typeCandidate of channelTypeCandidates) {
+      const match = channels?.find((item) => item.type === typeCandidate);
+      if (match) {
+        channel = match;
+        break;
+      }
+    }
+    if (!channel) {
+      channel = channels?.[0] ?? null;
+    }
 
     if (!channel) {
       const { data: fallbackChannels } = await supabase
@@ -359,11 +373,16 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
         .order("connected_at", { ascending: false, nullsFirst: false })
         .returns<Array<{ id: string; business_id: string; type: string; handle: string | null; access_token_encrypted: string | null }>>();
 
-      channel =
-        fallbackChannels?.find((item) => item.type === channelTypeCandidates[0]) ??
-        fallbackChannels?.find((item) => item.type === "instagram") ??
-        fallbackChannels?.[0] ??
-        null;
+      for (const typeCandidate of channelTypeCandidates) {
+        const match = fallbackChannels?.find((item) => item.type === typeCandidate);
+        if (match) {
+          channel = match;
+          break;
+        }
+      }
+      if (!channel) {
+        channel = fallbackChannels?.[0] ?? null;
+      }
 
       if (channel && providerAccountCandidates[0]) {
         await supabase
