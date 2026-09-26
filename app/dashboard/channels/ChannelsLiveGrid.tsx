@@ -226,6 +226,8 @@ export function ChannelsLiveGrid() {
   const [isLoading, setIsLoading] = useState(true);
   const [busyType, setBusyType] = useState("");
   const [providerIds, setProviderIds] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
+  const [debugReports, setDebugReports] = useState<Record<string, MetaDebugReport>>({});
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramStatusNotice, setTelegramStatusNotice] = useState("");
