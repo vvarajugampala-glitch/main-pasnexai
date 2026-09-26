@@ -99,13 +99,26 @@ function getMetaPayload(input: ProviderOutboundInput) {
 
 export function buildProviderOutboundPlan(input: ProviderOutboundInput): ProviderOutboundPlan {
   if (input.channelType === "telegram") {
+    if (!input.recipientId) {
+      return {
+        provider: "telegram",
+        channelType: input.channelType,
+        endpoint: "/sendMessage",
+        payload: null,
+        ready: false,
+        blocker: "Telegram chat id (recipient id) is missing.",
+      };
+    }
+
     return {
       provider: "telegram",
       channelType: input.channelType,
-      endpoint: null,
-      payload: null,
-      ready: false,
-      blocker: "Telegram outbound send needs bot token and chat id mapping.",
+      endpoint: "/sendMessage",
+      payload: {
+        chat_id: input.recipientId,
+        text: input.messageText,
+      },
+      ready: true,
     };
   }
 
@@ -214,3 +227,79 @@ export async function dispatchMetaOutboundMessage(input: {
     };
   }
 }
+
+export async function dispatchTelegramOutboundMessage(input: {
+  outboundPlan: ProviderOutboundPlan;
+  encryptedAccessToken: string;
+}): Promise<ProviderDispatchResult> {
+  if (process.env.PROVIDER_LIVE_DISPATCH_ENABLED !== "true") {
+    return {
+      attempted: false,
+      sent: false,
+      status: "disabled",
+      providerMessageId: null,
+      response: null,
+      error: "Live provider dispatch is disabled. Set PROVIDER_LIVE_DISPATCH_ENABLED=true after provider approval.",
+    };
+  }
+
+  if (input.outboundPlan.provider !== "telegram" || !input.outboundPlan.payload) {
+    return {
+      attempted: false,
+      sent: false,
+      status: "failed",
+      providerMessageId: null,
+      response: null,
+      error: input.outboundPlan.blocker ?? "Telegram outbound payload is not ready.",
+    };
+  }
+
+  try {
+    const botToken = decryptProviderToken(input.encryptedAccessToken);
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input.outboundPlan.payload),
+    });
+
+    const data = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      result?: { message_id?: number };
+      description?: string;
+    };
+
+    if (!response.ok || !data.ok) {
+      return {
+        attempted: true,
+        sent: false,
+        status: "failed",
+        providerMessageId: null,
+        response: data as Record<string, unknown>,
+        error: data.description ?? `Telegram API returned ${response.status}.`,
+      };
+    }
+
+    return {
+      attempted: true,
+      sent: true,
+      status: "sent",
+      providerMessageId: data.result?.message_id ? String(data.result.message_id) : null,
+      response: data as Record<string, unknown>,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      sent: false,
+      status: "failed",
+      providerMessageId: null,
+      response: null,
+      error: error instanceof Error ? error.message : "Telegram outbound dispatch failed.",
+    };
+  }
+}
+

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { HiCheckBadge, HiOutlineClock, HiOutlineGlobeAlt, HiOutlineShieldCheck } from "react-icons/hi2";
+import { HiCheckBadge, HiOutlineClock, HiOutlineGlobeAlt, HiOutlineShieldCheck, HiOutlineXMark } from "react-icons/hi2";
 import { SiFacebook, SiInstagram, SiMessenger, SiTelegram, SiWhatsapp } from "react-icons/si";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
@@ -226,8 +226,59 @@ export function ChannelsLiveGrid() {
   const [isLoading, setIsLoading] = useState(true);
   const [busyType, setBusyType] = useState("");
   const [providerIds, setProviderIds] = useState<Record<string, string>>({});
-  const [notice, setNotice] = useState("");
-  const [debugReports, setDebugReports] = useState<Record<string, MetaDebugReport>>({});
+  const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
+  const [telegramBotToken, setTelegramBotToken] = useState("");
+  const [telegramStatusNotice, setTelegramStatusNotice] = useState("");
+  const [isConnectingTelegram, setIsConnectingTelegram] = useState(false);
+
+  const connectTelegramBot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsConnectingTelegram(true);
+    setTelegramStatusNotice("");
+
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Please login again to connect Telegram Bot.");
+      }
+
+      const response = await fetch("/api/provider/telegram/connect", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bot_token: telegramBotToken }),
+      });
+
+      const result = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+        message?: string;
+        botUsername?: string;
+        displayName?: string;
+      };
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error ?? "Could not connect Telegram Bot.");
+      }
+
+      const nextChannels = await loadChannels();
+      setChannels(nextChannels);
+      setProviderIds(getProviderIdState(nextChannels));
+      setNotice(`Telegram Bot ${result.displayName || result.botUsername || ""} connected! Webhook registered and live for messaging.`);
+      setIsTelegramModalOpen(false);
+      setTelegramBotToken("");
+    } catch (error) {
+      setTelegramStatusNotice(error instanceof Error ? error.message : "Could not connect Telegram Bot.");
+    } finally {
+      setIsConnectingTelegram(false);
+    }
+  };
 
   const loadChannels = async () => {
     const supabase = createSupabaseBrowserClient();
@@ -688,9 +739,19 @@ export function ChannelsLiveGrid() {
                 {active ? <HiCheckBadge className="h-5 w-5 text-blue-300" /> : <HiOutlineClock className="h-5 w-5 text-amber-300" />}
               </div>
             </div>
-            <button onClick={() => prepareChannel(channel.type)} disabled={busyType === channel.type || busyType === `oauth-${channel.type}`} className="mt-4 w-full rounded-lg border border-white/10 bg-white/[0.04] py-2.5 text-xs font-bold transition group-hover:border-blue-300/50 group-hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60">
-              {busyType === channel.type ? "Preparing..." : prepared ? "Refresh Setup" : "Prepare Setup"}
-            </button>
+            {channel.type === "telegram" ? (
+              <button
+                type="button"
+                onClick={() => setIsTelegramModalOpen(true)}
+                className="mt-4 w-full rounded-lg border border-sky-300/30 bg-sky-400/10 py-2.5 text-xs font-bold text-sky-100 transition hover:bg-sky-400/20"
+              >
+                {prepared ? "Connect / Change Bot" : "Connect Telegram Bot"}
+              </button>
+            ) : (
+              <button onClick={() => prepareChannel(channel.type)} disabled={busyType === channel.type || busyType === `oauth-${channel.type}`} className="mt-4 w-full rounded-lg border border-white/10 bg-white/[0.04] py-2.5 text-xs font-bold transition group-hover:border-blue-300/50 group-hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60">
+                {busyType === channel.type ? "Preparing..." : prepared ? "Refresh Setup" : "Prepare Setup"}
+              </button>
+            )}
             {prepared && !channel.id.startsWith("template-") && (
               <div className="mt-3 rounded-lg border border-blue-300/15 bg-blue-400/10 p-2.5">
                 <label className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-200" htmlFor={`provider-id-${channel.id}`}>
@@ -823,6 +884,80 @@ export function ChannelsLiveGrid() {
           These cards prepare database, workflows, and onboarding state. Real message sending/receiving starts only after official platform API approval and token setup.
         </p>
       </div>
+
+      {isTelegramModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#07101d] p-6 text-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#26A5E4]">
+                  <SiTelegram className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black">Connect Telegram Bot</h3>
+                  <p className="text-xs text-slate-400">PASNEX Telegram Integration</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTelegramModalOpen(false);
+                  setTelegramStatusNotice("");
+                }}
+                className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                <HiOutlineXMark className="h-6 w-6" />
+              </button>
+            </div>
+
+            <form onSubmit={(e) => void connectTelegramBot(e)} className="mt-5 grid gap-4">
+              <div>
+                <label className="text-xs font-bold text-slate-300" htmlFor="telegram-bot-token-input">
+                  Telegram Bot Token
+                </label>
+                <input
+                  id="telegram-bot-token-input"
+                  type="password"
+                  value={telegramBotToken}
+                  onChange={(e) => setTelegramBotToken(e.target.value)}
+                  placeholder="e.g. 123456789:ABCdefGHIjklMNO..."
+                  required
+                  className="mt-2 w-full rounded-lg border border-white/15 bg-white/[0.04] px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-sky-400 focus:outline-none"
+                />
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  Create a bot with Telegram <span className="font-bold text-sky-300">@BotFather</span> and paste the Bot Token here.
+                </p>
+              </div>
+
+              {telegramStatusNotice && (
+                <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-xs text-amber-200">
+                  {telegramStatusNotice}
+                </div>
+              )}
+
+              <div className="mt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsTelegramModalOpen(false);
+                    setTelegramStatusNotice("");
+                  }}
+                  className="rounded-lg border border-white/10 px-4 py-2.5 text-xs font-bold text-slate-300 hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isConnectingTelegram || !telegramBotToken.trim()}
+                  className="rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg transition hover:from-sky-400 hover:to-blue-500 disabled:opacity-50"
+                >
+                  {isConnectingTelegram ? "Connecting..." : "Connect Bot"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
