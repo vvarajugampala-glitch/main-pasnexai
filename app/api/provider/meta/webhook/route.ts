@@ -7,6 +7,7 @@ import {
   type ProviderDispatchResult,
   type ProviderOutboundInput,
 } from "@/lib/provider-outbound";
+import { findBestAutomationMatch } from "@/lib/keyword-matcher";
 
 const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
 const appSecret = process.env.META_APP_SECRET?.trim();
@@ -466,77 +467,19 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
     // --- AUTOMATION MATCHING & EXECUTION ---
     const { data: automations } = await supabase
       .from("automations")
-      .select("id, name, trigger_type, config_json")
+      .select("id, name, trigger_type, config_json, created_at")
       .eq("business_id", channel.business_id)
-      .eq("status", "active");
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
 
-    const matchedAutomation = automations?.find((automation) => {
-      const config = (automation.config_json ?? {}) as {
-        keyword?: string;
-        keywords?: string[];
-        match_mode?: "contains_any" | "contains_all" | "exact";
-        comment_condition_type?: "any" | "keywords";
-        post_scope?: "all" | "specific";
-        post_id?: string;
-        channel_type?: string;
-      };
-
-      const isMetaPageChannel = (type?: string) => type === "facebook" || type === "messenger";
-      if (
-        config.channel_type &&
-        config.channel_type !== "all" &&
-        config.channel_type !== channel.type &&
-        !(isMetaPageChannel(config.channel_type) && isMetaPageChannel(channel.type))
-      ) {
-        return false;
-      }
-
-      if (isCommentEvent) {
-        if (!["comment_received", "comment_to_dm", "keyword_or_message"].includes(automation.trigger_type)) {
-          return false;
-        }
-      } else {
-        if (!["message_received", "keyword_or_message", "ai_chat_started"].includes(automation.trigger_type)) {
-          return false;
-        }
-      }
-
-      // Match post ID if specific scope configured
-      if (config.post_id && config.post_id.trim()) {
-        const targetPost = config.post_id.trim();
-        const incomingPost = commentDetails.postId ? commentDetails.postId.trim() : "";
-        if (incomingPost && !incomingPost.includes(targetPost) && !targetPost.includes(incomingPost)) {
-          return false;
-        }
-      }
-
-      // Check comment condition: "any" comment vs keywords
-      if (config.comment_condition_type === "any" || config.keyword === "*") {
-        return true;
-      }
-
-      const activeKeywords = Array.isArray(config.keywords) && config.keywords.length > 0
-        ? config.keywords
-        : config.keyword
-          ? [config.keyword]
-          : [];
-
-      if (!activeKeywords.length || activeKeywords.includes("*")) {
-        return true;
-      }
-
-      const textLower = incomingText.toLowerCase().trim();
-      const mode = config.match_mode || "contains_any";
-
-      if (mode === "exact") {
-        return activeKeywords.some((kw) => textLower === kw.toLowerCase().trim());
-      }
-      if (mode === "contains_all") {
-        return activeKeywords.every((kw) => textLower.includes(kw.toLowerCase().trim()));
-      }
-      // contains_any
-      return activeKeywords.some((kw) => textLower.includes(kw.toLowerCase().trim()));
-    });
+    const matchedAutomation = automations && automations.length > 0
+      ? findBestAutomationMatch(automations, {
+          channelType: channel.type,
+          isCommentEvent,
+          incomingText,
+          postId: commentDetails.postId,
+        })
+      : null;
 
     let automationResult: { executed: boolean; automationName?: string; dispatchStatus?: string } = { executed: false };
 
