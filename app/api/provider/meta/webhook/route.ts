@@ -473,6 +473,10 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
     const matchedAutomation = automations?.find((automation) => {
       const config = (automation.config_json ?? {}) as {
         keyword?: string;
+        keywords?: string[];
+        match_mode?: "contains_any" | "contains_all" | "exact";
+        comment_condition_type?: "any" | "keywords";
+        post_scope?: "all" | "specific";
         post_id?: string;
         channel_type?: string;
       };
@@ -497,85 +501,157 @@ async function createInboxMessageFromWebhook(payload: MetaWebhookPayload, eventI
         }
       }
 
-      if (config.post_id && commentDetails.postId && config.post_id !== commentDetails.postId) {
-        return false;
+      // Match post ID if specific scope configured
+      if (config.post_id && config.post_id.trim()) {
+        const targetPost = config.post_id.trim();
+        const incomingPost = commentDetails.postId ? commentDetails.postId.trim() : "";
+        if (incomingPost && !incomingPost.includes(targetPost) && !targetPost.includes(incomingPost)) {
+          return false;
+        }
       }
 
-      if (config.keyword && config.keyword !== "*") {
-        return incomingText.toLowerCase().includes(config.keyword.toLowerCase());
+      // Check comment condition: "any" comment vs keywords
+      if (config.comment_condition_type === "any" || config.keyword === "*") {
+        return true;
       }
 
-      return true;
+      const activeKeywords = Array.isArray(config.keywords) && config.keywords.length > 0
+        ? config.keywords
+        : config.keyword
+          ? [config.keyword]
+          : [];
+
+      if (!activeKeywords.length || activeKeywords.includes("*")) {
+        return true;
+      }
+
+      const textLower = incomingText.toLowerCase().trim();
+      const mode = config.match_mode || "contains_any";
+
+      if (mode === "exact") {
+        return activeKeywords.some((kw) => textLower === kw.toLowerCase().trim());
+      }
+      if (mode === "contains_all") {
+        return activeKeywords.every((kw) => textLower.includes(kw.toLowerCase().trim()));
+      }
+      // contains_any
+      return activeKeywords.some((kw) => textLower.includes(kw.toLowerCase().trim()));
     });
 
     let automationResult: { executed: boolean; automationName?: string; dispatchStatus?: string } = { executed: false };
 
     if (matchedAutomation) {
       const config = (matchedAutomation.config_json ?? {}) as {
+        action_type?: string;
         automated_dm?: string;
         response_message?: string;
         dm_text?: string;
+        public_reply_enabled?: boolean;
+        public_reply_text?: string;
       };
 
+      // 1. OPTIONAL PUBLIC COMMENT REPLY
+      let publicReplyStatus = "skipped";
+      if (config.public_reply_enabled && config.public_reply_text?.trim() && commentDetails.commentId) {
+        const publicReplyInput: ProviderOutboundInput = {
+          channelType: channel.type,
+          providerAccountId: channel.handle,
+          commentId: commentDetails.commentId,
+          messageText: config.public_reply_text.trim(),
+          actionType: "public_comment_reply",
+        };
+
+        const publicPlan = buildProviderOutboundPlan(publicReplyInput);
+        if (channel.access_token_encrypted && publicPlan.ready) {
+          const publicDispatch = await dispatchMetaOutboundMessage({
+            outboundPlan: publicPlan,
+            encryptedAccessToken: channel.access_token_encrypted,
+          });
+          publicReplyStatus = publicDispatch.status;
+
+          await supabase.from("provider_outbound_messages").insert({
+            business_id: channel.business_id,
+            conversation_id: conversation.id,
+            channel_id: channel.id,
+            provider: "meta",
+            channel_type: channel.type,
+            recipient_id: commentDetails.commentId,
+            endpoint: publicPlan.endpoint,
+            payload: publicPlan.payload ?? {},
+            status: publicDispatch.status,
+            provider_response: publicDispatch.response ?? {},
+            error_message: publicDispatch.error,
+            sent_at: publicDispatch.sent ? new Date().toISOString() : null,
+          });
+        }
+      }
+
+      // 2. PRIVATE DM (if action_type is send_dm or send_link or ai_handoff)
+      const shouldSendDm = config.action_type !== "public_reply_only";
+      let dmStatus = "skipped";
       const replyText =
         config.automated_dm ||
         config.response_message ||
         config.dm_text ||
         "Thanks for your comment! We've sent you a direct message.";
 
-      const outboundInput: ProviderOutboundInput = {
-        channelType: channel.type,
-        providerAccountId: channel.handle,
-        recipientId: providerSenderId,
-        commentId: commentDetails.commentId,
-        messageText: replyText,
-      };
+      if (shouldSendDm) {
+        const outboundInput: ProviderOutboundInput = {
+          channelType: channel.type,
+          providerAccountId: channel.handle,
+          recipientId: providerSenderId,
+          commentId: commentDetails.commentId,
+          messageText: replyText,
+          actionType: "send_dm",
+        };
 
-      const outboundPlan = buildProviderOutboundPlan(outboundInput);
-      let dispatchResult: ProviderDispatchResult = {
-        attempted: false,
-        sent: false,
-        status: "disabled",
-        providerMessageId: null,
-        response: null,
-        error: channel.access_token_encrypted ? "Live provider dispatch disabled via env" : "Channel access token missing",
-      };
+        const outboundPlan = buildProviderOutboundPlan(outboundInput);
+        let dispatchResult: ProviderDispatchResult = {
+          attempted: false,
+          sent: false,
+          status: "disabled",
+          providerMessageId: null,
+          response: null,
+          error: channel.access_token_encrypted ? "Live provider dispatch disabled via env" : "Channel access token missing",
+        };
 
-      if (channel.access_token_encrypted && outboundPlan.ready) {
-        dispatchResult = await dispatchMetaOutboundMessage({
-          outboundPlan,
-          encryptedAccessToken: channel.access_token_encrypted,
+        if (channel.access_token_encrypted && outboundPlan.ready) {
+          dispatchResult = await dispatchMetaOutboundMessage({
+            outboundPlan,
+            encryptedAccessToken: channel.access_token_encrypted,
+          });
+        }
+        dmStatus = dispatchResult.status;
+
+        await supabase.from("provider_outbound_messages").insert({
+          business_id: channel.business_id,
+          conversation_id: conversation.id,
+          channel_id: channel.id,
+          provider: "meta",
+          channel_type: channel.type,
+          recipient_id: providerSenderId || commentDetails.commentId,
+          endpoint: outboundPlan.endpoint,
+          payload: outboundPlan.payload ?? {},
+          status: dispatchResult.status,
+          provider_response: dispatchResult.response ?? {},
+          error_message: dispatchResult.error,
+          sent_at: dispatchResult.sent ? new Date().toISOString() : null,
+        });
+
+        await supabase.from("messages").insert({
+          conversation_id: conversation.id,
+          sender_type: "ai",
+          message_text: replyText,
+          ai_generated: true,
+          provider_message_id: dispatchResult.providerMessageId,
+          delivery_status: dispatchResult.status,
         });
       }
-
-      await supabase.from("provider_outbound_messages").insert({
-        business_id: channel.business_id,
-        conversation_id: conversation.id,
-        channel_id: channel.id,
-        provider: "meta",
-        channel_type: channel.type,
-        recipient_id: providerSenderId || commentDetails.commentId,
-        endpoint: outboundPlan.endpoint,
-        payload: outboundPlan.payload ?? {},
-        status: dispatchResult.status,
-        provider_response: dispatchResult.response ?? {},
-        error_message: dispatchResult.error,
-        sent_at: dispatchResult.sent ? new Date().toISOString() : null,
-      });
-
-      await supabase.from("messages").insert({
-        conversation_id: conversation.id,
-        sender_type: "ai",
-        message_text: replyText,
-        ai_generated: true,
-        provider_message_id: dispatchResult.providerMessageId,
-        delivery_status: dispatchResult.status,
-      });
 
       automationResult = {
         executed: true,
         automationName: matchedAutomation.name,
-        dispatchStatus: dispatchResult.status,
+        dispatchStatus: `dm:${dmStatus}|public:${publicReplyStatus}`,
       };
     }
 

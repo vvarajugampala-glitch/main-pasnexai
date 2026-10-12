@@ -84,12 +84,35 @@ export async function POST(request: Request) {
       channelType?: string;
       triggerType?: string;
       keyword?: string;
+      keywords?: string[];
+      matchMode?: string;
+      commentConditionType?: "any" | "keywords";
+      postScope?: "all" | "specific";
       postId?: string;
+      actionType?: string;
       responseMessage?: string;
+      publicReplyEnabled?: boolean;
+      publicReplyText?: string;
       status?: string;
     };
 
-    const { id, name, channelType, triggerType, keyword, postId, responseMessage, status } = body;
+    const {
+      id,
+      name,
+      channelType,
+      triggerType,
+      keyword,
+      keywords,
+      matchMode,
+      commentConditionType,
+      postScope,
+      postId,
+      actionType,
+      responseMessage,
+      publicReplyEnabled,
+      publicReplyText,
+      status,
+    } = body;
 
     if (!name || !name.trim()) {
       return NextResponse.json({ error: "Automation name is required." }, { status: 400 });
@@ -126,16 +149,35 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const defaultResponse = "Hi! Thanks for your interest. Please share your requirement so our team can assist you.";
     const responseText = responseMessage?.trim() || defaultResponse;
+    const isAnyComment = commentConditionType === "any";
+    const primaryKeyword = isAnyComment ? "*" : keyword ? keyword.trim() : (keywords && keywords[0]) ? keywords[0] : "price";
+    const cleanKeywords = isAnyComment ? ["*"] : Array.isArray(keywords) && keywords.length > 0 ? keywords : [primaryKeyword];
+
+    // Sanitize and extract postId from Instagram URL if provided as URL
+    let cleanPostId = postId ? postId.trim() : "";
+    if (cleanPostId.includes("instagram.com/")) {
+      const urlMatch = cleanPostId.match(/\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/);
+      if (urlMatch && urlMatch[1]) {
+        cleanPostId = urlMatch[1];
+      }
+    }
 
     const config_json = {
       template: name.trim(),
       channel_type: normChannelType,
-      keyword: keyword ? keyword.trim() : "price",
-      customer_comment: keyword ? keyword.trim() : "price",
+      post_scope: postScope || (cleanPostId ? "specific" : "all"),
+      post_id: cleanPostId,
+      comment_condition_type: commentConditionType || (isAnyComment ? "any" : "keywords"),
+      keyword: primaryKeyword,
+      keywords: cleanKeywords,
+      match_mode: matchMode || "contains_any",
+      action_type: actionType || "send_dm",
+      customer_comment: isAnyComment ? "any comment" : primaryKeyword,
       automated_dm: responseText,
       response_message: responseText,
       dm_text: responseText,
-      post_id: postId ? postId.trim() : "",
+      public_reply_enabled: Boolean(publicReplyEnabled),
+      public_reply_text: publicReplyText ? publicReplyText.trim() : "",
       created_from: "builder",
     };
 

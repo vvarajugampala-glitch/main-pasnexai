@@ -1,15 +1,22 @@
 export function getRequiredEnv(name: string) {
-  const value = process.env[name];
+  let value = process.env[name];
 
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  value = value.trim().replace(/^["']|["']$/g, "");
+  if (name === "NEXT_PUBLIC_SUPABASE_URL" && !value.startsWith("http://") && !value.startsWith("https://")) {
+    value = `https://${value}`;
   }
 
   return value;
 }
 
 export function hasSupabaseEnv() {
-  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return Boolean(url && key);
 }
 
 export function isJwtLikeKey(value: string | undefined) {

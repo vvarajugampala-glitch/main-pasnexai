@@ -8,6 +8,7 @@ export type ProviderOutboundInput = {
   recipientId?: string | null;
   commentId?: string | null;
   messageText: string;
+  actionType?: "send_dm" | "public_comment_reply" | string;
 };
 
 export type ProviderOutboundPlan = {
@@ -33,7 +34,12 @@ function getGraphApiBaseUrl() {
   return `https://graph.facebook.com/${apiVersion}`;
 }
 
-function getMetaEndpoint(channelType: ProviderChannelType, providerAccountId?: string | null) {
+function getMetaEndpoint(channelType: ProviderChannelType, providerAccountId?: string | null, actionType?: string, commentId?: string | null) {
+  if (actionType === "public_comment_reply") {
+    if (!commentId) return null;
+    return `/${commentId}/replies`;
+  }
+
   if (!providerAccountId) return null;
 
   if (channelType === "whatsapp") {
@@ -52,6 +58,12 @@ function getMetaEndpoint(channelType: ProviderChannelType, providerAccountId?: s
 }
 
 function getMetaPayload(input: ProviderOutboundInput) {
+  if (input.actionType === "public_comment_reply") {
+    return {
+      message: input.messageText,
+    };
+  }
+
   if (input.channelType === "whatsapp") {
     if (!input.recipientId) return null;
     return {
@@ -122,7 +134,7 @@ export function buildProviderOutboundPlan(input: ProviderOutboundInput): Provide
     };
   }
 
-  const endpoint = getMetaEndpoint(input.channelType, input.providerAccountId);
+  const endpoint = getMetaEndpoint(input.channelType, input.providerAccountId, input.actionType, input.commentId);
   const payload = getMetaPayload(input);
 
   if (!endpoint) {
